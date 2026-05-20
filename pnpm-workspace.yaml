@@ -1,0 +1,6 @@
+packages:
+  - "."
+allowBuilds:
+  core-js: true
+  deasync: true
+  yarn: true
