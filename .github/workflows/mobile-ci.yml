@@ -186,8 +186,14 @@ jobs:
           if git diff --cached --quiet; then
             echo "✅ Không có file mới cần commit"
           else
-            git commit -m "chore: auto-generate mobile platform files [skip ci]"
-            git push
+            git commit -m "chore: auto-generate ${{ matrix.platform }} platform files [skip ci]"
+
+            # Push với retry (2 matrix jobs có thể push cùng lúc)
+            for i in 1 2 3; do
+              git pull --rebase origin main && git push && break
+              echo "⏳ Push lần $i thất bại, retry sau 5s..."
+              sleep 5
+            done
             echo "✅ Đã commit và push generated files"
           fi
 

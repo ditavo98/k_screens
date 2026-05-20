@@ -155,7 +155,6 @@ def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
 } else {
-    // Fallback cho CI/CD: đọc từ env vars
     keystoreProperties['storeFile'] = System.getenv('KEYSTORE_STORE_FILE') ?: 'release-keystore.jks'
     keystoreProperties['storePassword'] = System.getenv('KEYSTORE_PASSWORD') ?: ''
     keystoreProperties['keyAlias'] = System.getenv('KEYSTORE_ALIAS') ?: 'release'
@@ -163,13 +162,12 @@ if (keystorePropertiesFile.exists()) {
 }
 \`;
 
-    // Chèn trước 'android {'
     content = content.replace(
-      /^(android\s*\{)/m,
-      keystoreBlock + '\n\$1'
+      /^(android\\s*\\{)/m,
+      keystoreBlock + '\\n\$1'
     );
 
-    // 2. Thêm signingConfigs block sau 'android {'
+    // 2. Thêm signingConfigs block TRƯỚC buildTypes
     const signingBlock = \`
     signingConfigs {
         release {
@@ -181,26 +179,37 @@ if (keystorePropertiesFile.exists()) {
     }
 \`;
 
-    // Tìm buildTypes block và thêm signingConfigs trước nó
     if (content.includes('buildTypes')) {
       content = content.replace(
-        /(\s*buildTypes\s*\{)/,
+        /(\\s*buildTypes\\s*\\{)/,
         signingBlock + '\$1'
       );
     } else {
-      // Nếu không có buildTypes, thêm sau 'android {'
       content = content.replace(
-        /(android\s*\{)/,
-        '\$1\n' + signingBlock
+        /(android\\s*\\{)/,
+        '\$1\\n' + signingBlock
       );
     }
 
-    // 3. Cấu hình release buildType dùng signingConfig
+    // 3. Thêm signingConfig vào buildTypes > release block
+    //    Tìm 'buildTypes' trước, rồi tìm 'release {' bên trong
     if (!content.includes('signingConfig signingConfigs.release')) {
-      content = content.replace(
-        /(release\s*\{[^}]*)(})/,
-        '\$1    signingConfig signingConfigs.release\n        \$2'
-      );
+      // Tìm vị trí buildTypes block
+      const btMatch = content.match(/buildTypes\\s*\\{/);
+      if (btMatch) {
+        const btStart = content.indexOf(btMatch[0]);
+        const afterBt = content.substring(btStart);
+
+        // Tìm 'release {' trong phạm vi buildTypes
+        const releaseMatch = afterBt.match(/(release\\s*\\{)/);
+        if (releaseMatch) {
+          const releasePos = btStart + afterBt.indexOf(releaseMatch[0]);
+          const insertPos = releasePos + releaseMatch[0].length;
+          content = content.substring(0, insertPos) +
+            '\\n            signingConfig signingConfigs.release' +
+            content.substring(insertPos);
+        }
+      }
     }
 
     fs.writeFileSync('${gradle_file}', content);
