@@ -302,6 +302,9 @@ case "$COMMAND" in
     # Bước 3: Platform-specific fixes
     run_platform_fixes
 
+    # Bước 3.5: Android keystore (tạo nếu chưa có + config Gradle)
+    setup_android_keystore
+
     # Bước 4: Fastlane (SAU KHI platforms đã add)
     run_fastlane_setup
 

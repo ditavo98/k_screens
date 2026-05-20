@@ -31,6 +31,9 @@ on:
 #   MATCH_SSH_KEY       — SSH private key để clone match repo
 #
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Mobile (${{ matrix.platform }})
@@ -50,13 +53,16 @@ jobs:
 
     env:
       # ── App identity ────────────────────────────────────────────────────────
-      APP_BUNDLE_ID: kr.ailive.kscreens
+      APP_BUNDLE_ID: com.kscreens.app
       APP_NAME: K Screens
       APP_VERSION: "1.0.0"
 
       # ── mobile-ci config ────────────────────────────────────────────────────
       CAP_PLATFORMS: ${{ matrix.platform }}
       SKIP_FASTLANE: ${{ matrix.platform == 'android' && 'true' || 'false' }}
+
+      # ── Google Play (chỉ dùng cho Android) ──────────────────────────────
+      GOOGLE_PLAY_JSON_KEY: ${{ secrets.GOOGLE_PLAY_JSON_KEY_B64 }}
 
       # ── Apple / Fastlane (chỉ dùng cho iOS) ────────────────────────────────
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -70,7 +76,7 @@ jobs:
       CI: "true"
       SKIP_ASC_SETUP: "false"
       SKIP_BUILD: "false"
-      SKIP_UPLOAD: ${{ inputs.skip_upload || 'true' }}
+      SKIP_UPLOAD: ${{ inputs.skip_upload || 'false' }}
 
     steps:
       # ═══════════════════════════════════════════════════════════════════════
@@ -144,6 +150,36 @@ jobs:
         run: mobile-ci setup
 
       # ═══════════════════════════════════════════════════════════════════════
+      # STEP 8.5: Commit generated files (android/, ios/, keystore, etc.)
+      # Chỉ commit khi có file mới — lần sau sẽ skip tạo lại
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "📝 Commit generated files"
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Thêm các file/folder generated
+          git add -f \
+            android/ \
+            ios/ \
+            capacitor.config.json \
+            fastlane/ \
+            Gemfile \
+            Gemfile.lock \
+            .env.fastlane.example \
+            2>/dev/null || true
+
+          # Chỉ commit nếu có thay đổi
+          if git diff --cached --quiet; then
+            echo "✅ Không có file mới cần commit"
+          else
+            git commit -m "chore: auto-generate mobile platform files [skip ci]"
+            git push
+            echo "✅ Đã commit và push generated files"
+          fi
+
+      # ═══════════════════════════════════════════════════════════════════════
       # STEP 9: (iOS only) Chạy Fastlane CI pipeline
       # ═══════════════════════════════════════════════════════════════════════
       - name: "🍎 Fastlane CI Pipeline"
@@ -157,14 +193,42 @@ jobs:
             Branch: ${{ github.ref_name }}
 
       # ═══════════════════════════════════════════════════════════════════════
-      # STEP 10: (Android only) Build APK
+      # STEP 10: (Android only) Build Release APK + AAB
       # ═══════════════════════════════════════════════════════════════════════
-      - name: "🤖 Build Android APK"
+      - name: "🤖 Build Android Release"
         if: matrix.platform == 'android'
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleRelease bundleRelease
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 10.5: (Android only) Upload lên Google Play via Fastlane
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "🚀 Upload Google Play"
+        if: matrix.platform == 'android' && env.GOOGLE_PLAY_JSON_KEY != '' && env.SKIP_UPLOAD != 'true'
+        run: |
+          # Decode JSON key từ base64
+          echo "$GOOGLE_PLAY_JSON_KEY" | base64 --decode > /tmp/play-store-key.json
+
+          # Cài fastlane nếu chưa có
+          gem install fastlane --no-document || true
+
+          # Upload AAB lên Google Play (internal track)
+          fastlane supply \
+            --aab android/app/build/outputs/bundle/release/app-release.aab \
+            --json_key /tmp/play-store-key.json \
+            --package_name "$APP_BUNDLE_ID" \
+            --track internal \
+            --skip_upload_metadata \
+            --skip_upload_changelogs \
+            --skip_upload_images \
+            --skip_upload_screenshots \
+            --skip_upload_apk
+
+          # Xóa key sau khi dùng
+          rm -f /tmp/play-store-key.json
+          echo "✅ Upload Google Play (internal) thành công!"
 
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 11: Upload build artifacts
@@ -182,7 +246,16 @@ jobs:
         if: matrix.platform == 'android' && always()
         uses: actions/upload-artifact@v4
         with:
-          name: K-Screens-Android-${{ github.run_number }}
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: K-Screens-Android-APK-${{ github.run_number }}
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: "📤 Upload Android AAB"
+        if: matrix.platform == 'android' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: K-Screens-Android-AAB-${{ github.run_number }}
+          path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: ignore
           retention-days: 30

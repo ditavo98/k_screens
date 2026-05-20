@@ -34,7 +34,7 @@ log_section() { echo -e "\n${BOLD}${CYAN}═════════════
 # Cấu hình (override bằng biến môi trường khi cần)
 # ----------------------------------------------------------------------------- 
 APP_NAME="${CAP_APP_NAME:-K Screens}"
-APP_ID="${CAP_APP_ID:-kr.ailive.kscreens}"
+APP_ID="${CAP_APP_ID:-com.kscreens.app}"
 WEB_DIR="${CAP_WEB_DIR:-dist}"
 BUILD_CMD="${CAP_BUILD_CMD:-}"          # để trống → tự detect
 PACKAGE_MANAGER=""                      # tự detect
@@ -948,7 +948,7 @@ module Fastlane
           ),
           FastlaneCore::ConfigItem.new(
             key:         :bundle_id,
-            description: "Bundle Identifier (vd: kr.ailive.kscreens)",
+            description: "Bundle Identifier (vd: com.kscreens.app)",
             type:        String,
           ),
           FastlaneCore::ConfigItem.new(

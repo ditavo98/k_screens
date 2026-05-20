@@ -4,7 +4,7 @@
 
 # ── Thông tin App ────────────────────────────────────────────────────────────
 APP_NAME="K Screens"
-APP_ID="kr.ailive.kscreens"
+APP_ID="com.kscreens.app"
 APP_VERSION="${APP_VERSION:-1.0.0}"
 
 # ── Capacitor ────────────────────────────────────────────────────────────────
