@@ -307,6 +307,7 @@ lane :create_app do |opts|
   create_bundle_id(bundle_id: bundle_id, name: app_name)
 
   produce(
+    api_key:         asc_api_key,
     app_identifier:  bundle_id,
     app_name:        app_name,
     language:        language,
