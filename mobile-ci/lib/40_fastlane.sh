@@ -403,8 +403,10 @@ lane :build_ios do |opts|
     xc_args = "DEVELOPMENT_TEAM=#{ENV["APPLE_TEAM_ID"]}"
   end
 
-  gym(
-    workspace:         "ios/App/App.xcworkspace",
+  workspace_path = "ios/App/App.xcworkspace"
+  project_path = "ios/App/App.xcodeproj"
+  
+  gym_options = {
     scheme:            opts[:scheme] || ENV["IOS_SCHEME"] || "App",
     configuration:     opts[:config] || ENV["BUILD_CONFIG"] || "Release",
     export_method:     "app-store",
@@ -415,7 +417,15 @@ lane :build_ios do |opts|
     include_bitcode:   false,
     xcargs:            xc_args,
     export_options:    export_opts,
-  )
+  }
+
+  if Dir.exist?(workspace_path)
+    gym_options[:workspace] = workspace_path
+  else
+    gym_options[:project] = project_path
+  end
+
+  gym(**gym_options)
   UI.success("✅ Build xong: build/App.ipa")
 end
 
