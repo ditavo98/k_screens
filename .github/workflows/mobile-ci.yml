@@ -91,7 +91,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
 
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 3: Install node dependencies
