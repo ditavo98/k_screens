@@ -119,7 +119,7 @@ pkg_add() {
   fi
 
   case "${PACKAGE_MANAGER:-npm}" in
-    pnpm) [[ "$is_dev" == "true" ]] && pnpm add -D "${pkgs[@]}" || pnpm add "${pkgs[@]}" ;;
+    pnpm) [[ "$is_dev" == "true" ]] && pnpm add -w -D "${pkgs[@]}" || pnpm add -w "${pkgs[@]}" ;;
     yarn) [[ "$is_dev" == "true" ]] && yarn add --dev "${pkgs[@]}" || yarn add "${pkgs[@]}" ;;
     *)    [[ "$is_dev" == "true" ]] && npm install --save-dev "${pkgs[@]}" || npm install --save "${pkgs[@]}" ;;
   esac
