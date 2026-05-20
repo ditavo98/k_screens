@@ -105,10 +105,9 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       # ═══════════════════════════════════════════════════════════════════════
-      # STEP 4: Setup Ruby + Bundler (chỉ iOS cần cho Fastlane)
+      # STEP 4: Setup Ruby + Bundler (Cần cho Fastlane ở cả iOS và Android)
       # ═══════════════════════════════════════════════════════════════════════
       - name: "💎 Setup Ruby"
-        if: matrix.platform == 'ios'
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'

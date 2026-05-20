@@ -348,16 +348,27 @@ end
 # ── LANE: setup_signing ──────────────────────────────────────────────────────
 lane :setup_signing do |opts|
   UI.header("🔑 Setup Code Signing (Match)")
+
+  # Match đọc MATCH_PASSWORD từ env tự động
+  key = asc_api_key
+  api_key_result = app_store_connect_api_key(
+    key_id:         key[:key_id],
+    issuer_id:      key[:issuer_id],
+    key_content:    key[:key_content],
+    is_key_content_base64: false,
+    duration:       1200,
+    in_house:       false,
+  )
+
   match(
-    type:                  opts[:type]  || ENV["MATCH_TYPE"] || "appstore",
+    type:                  opts[:type] || ENV["MATCH_TYPE"] || "appstore",
     app_identifier:        opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}",
     git_url:               ENV["MATCH_GIT_URL"] || UI.user_error!("Thiếu MATCH_GIT_URL"),
     git_branch:            ENV["MATCH_GIT_BRANCH"] || "main",
-    password:              ENV["MATCH_PASSWORD"],
     readonly:              ENV["CI"] ? true : false,
     clone_branch_directly: true,
     force_for_new_devices: !ENV["CI"],
-    api_key:               asc_api_key,
+    api_key:               api_key_result,
   )
   UI.success("✅ Code signing xong (type=#{opts[:type] || 'appstore'})")
 end
