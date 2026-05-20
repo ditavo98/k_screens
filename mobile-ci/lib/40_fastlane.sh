@@ -306,8 +306,18 @@ lane :create_app do |opts|
 
   create_bundle_id(bundle_id: bundle_id, name: app_name)
 
+  # Set API key globally cho produce
+  key = asc_api_key
+  app_store_connect_api_key(
+    key_id:         key[:key_id],
+    issuer_id:      key[:issuer_id],
+    key_content:    key[:key_content],
+    is_key_content_base64: false,
+    duration:       1200,
+    in_house:       false,
+  )
+
   produce(
-    api_key:         asc_api_key,
     app_identifier:  bundle_id,
     app_name:        app_name,
     language:        language,
