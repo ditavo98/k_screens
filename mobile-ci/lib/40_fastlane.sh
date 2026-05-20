@@ -251,6 +251,8 @@ require "time"
 
 before_all do
   setup_ci if ENV["CI"]
+  # Global register ASC API key for all actions (including Xcode automatic signing)
+  app_store_connect_api_key(**asc_api_key)
 end
 
 # Load App Store Connect API Key ─────────────────────────────────────────────────
@@ -398,10 +400,17 @@ lane :build_ios do |opts|
     export_opts = { provisioningProfiles: { bundle_id => "match AppStore #{bundle_id}" } }
   end
 
-  xc_args = nil
+  xc_args = []
   if ENV["APPLE_TEAM_ID"] && !ENV["APPLE_TEAM_ID"].empty?
-    xc_args = "DEVELOPMENT_TEAM=#{ENV["APPLE_TEAM_ID"]}"
+    xc_args << "DEVELOPMENT_TEAM=#{ENV["APPLE_TEAM_ID"]}"
   end
+
+  if ENV["MATCH_GIT_URL"].nil? || ENV["MATCH_GIT_URL"].empty?
+    xc_args << "-allowProvisioningUpdates"
+  end
+
+  xc_args_str = xc_args.join(" ")
+  xc_args_str = nil if xc_args_str.empty?
 
   workspace_path = "ios/App/App.xcworkspace"
   project_path = "ios/App/App.xcodeproj"
@@ -415,7 +424,7 @@ lane :build_ios do |opts|
     clean:             true,
     include_symbols:   true,
     include_bitcode:   false,
-    xcargs:            xc_args,
+    xcargs:            xc_args_str,
     export_options:    export_opts,
   }
 
