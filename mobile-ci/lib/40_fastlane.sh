@@ -349,6 +349,11 @@ end
 lane :setup_signing do |opts|
   UI.header("🔑 Setup Code Signing (Match)")
 
+  git_url = ENV["MATCH_GIT_URL"]
+  if git_url.nil? || git_url.empty?
+    UI.user_error!("Thiếu MATCH_GIT_URL! Vui lòng cấu hình biến môi trường hoặc GitHub Secret MATCH_GIT_URL.")
+  end
+
   # Match đọc MATCH_PASSWORD từ env tự động
   key = asc_api_key
   api_key_result = app_store_connect_api_key(
@@ -363,7 +368,7 @@ lane :setup_signing do |opts|
   match(
     type:                  opts[:type] || ENV["MATCH_TYPE"] || "appstore",
     app_identifier:        opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}",
-    git_url:               ENV["MATCH_GIT_URL"] || UI.user_error!("Thiếu MATCH_GIT_URL"),
+    git_url:               git_url,
     git_branch:            ENV["MATCH_GIT_BRANCH"] || "main",
     readonly:              ENV["CI"] ? true : false,
     clone_branch_directly: true,
@@ -377,7 +382,12 @@ end
 lane :build_ios do |opts|
   UI.header("🏗️  Build iOS IPA")
   bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
-  setup_signing(bundle_id: bundle_id, type: "appstore") unless opts[:skip_signing]
+
+  if ENV["MATCH_GIT_URL"].nil? || ENV["MATCH_GIT_URL"].empty?
+    UI.important("⚠️ Bỏ qua setup_signing vì MATCH_GIT_URL trống. Sẽ cố gắng build Xcode mà không dùng Match...")
+  else
+    setup_signing(bundle_id: bundle_id, type: "appstore") unless opts[:skip_signing]
+  end
 
   gym(
     scheme:            opts[:scheme] || ENV["IOS_SCHEME"] || "${IOS_SCHEME:-App}",
