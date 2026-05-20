@@ -159,16 +159,28 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Thêm các file/folder generated
-          git add -f \
+          # Thêm từng path riêng (tránh 1 path lỗi → fail hết)
+          for path in \
             android/ \
             ios/ \
             capacitor.config.json \
             fastlane/ \
             Gemfile \
             Gemfile.lock \
-            .env.fastlane.example \
-            2>/dev/null || true
+            .env.fastlane.example; do
+            if [ -e "$path" ]; then
+              git add -f "$path"
+              echo "  ✓ Staged: $path"
+            else
+              echo "  ✗ Skip (không tồn tại): $path"
+            fi
+          done
+
+          # Debug: hiển thị những gì đã staged
+          echo ""
+          echo "── Staged files ──"
+          git diff --cached --stat || true
+          echo ""
 
           # Chỉ commit nếu có thay đổi
           if git diff --cached --quiet; then

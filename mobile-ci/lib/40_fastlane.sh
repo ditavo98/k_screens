@@ -287,7 +287,7 @@ lane :create_bundle_id do |opts|
 
   if result[:success]
     UI.success("✅ Bundle ID: #{result[:identifier]} (id=#{result[:id]})")
-    File.write("fastlane/bundle_id_result.json", JSON.pretty_generate(result))
+    File.write(File.join(__dir__, "bundle_id_result.json"), JSON.pretty_generate(result))
   else
     unless ["ENTITY_ALREADY_EXISTS", "already exists"].any? { |s| result[:error].to_s.include?(s) }
       UI.user_error!(result[:error])
