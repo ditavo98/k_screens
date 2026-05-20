@@ -143,6 +143,13 @@ jobs:
         run: bash mobile-ci/install.sh
 
       # ═══════════════════════════════════════════════════════════════════════
+      # STEP 7.5: Xóa platform dirs cũ (1 lần) để tạo lại từ đầu
+      # TODO: Xóa step này sau khi CI chạy thành công
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "🧹 Clean old platform dirs"
+        run: rm -rf android/ ios/ fastlane/ Gemfile Gemfile.lock capacitor.config.json .env.fastlane.example
+
+      # ═══════════════════════════════════════════════════════════════════════
       # STEP 8: Chạy mobile-ci setup
       # Tự động: fix code → build web → add platform → cap sync → fastlane
       # ═══════════════════════════════════════════════════════════════════════
@@ -161,6 +168,8 @@ jobs:
 
           # Thêm từng path riêng (tránh 1 path lỗi → fail hết)
           for path in \
+            package.json \
+            pnpm-lock.yaml \
             android/ \
             ios/ \
             capacitor.config.json \

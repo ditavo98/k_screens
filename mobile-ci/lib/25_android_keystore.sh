@@ -100,8 +100,6 @@ _ensure_keystore_properties() {
     return
   fi
 
-  # Nếu không có password (keystore đã tồn tại từ trước)
-  # → dùng env var hoặc placeholder
   if [[ -z "$password" ]]; then
     password="${KEYSTORE_PASSWORD:-CHANGE_ME}"
   fi
@@ -110,9 +108,6 @@ _ensure_keystore_properties() {
   cat > "$props_file" << EOF
 # Android Release Keystore Properties
 # Tạo bởi mobile-ci
-#
-# ⚠️ KHÔNG commit file này nếu chứa password thật!
-# Trên CI/CD: dùng env vars KEYSTORE_PASSWORD, KEYSTORE_ALIAS
 storeFile=release-keystore.jks
 storePassword=${password}
 keyAlias=${alias}
@@ -133,8 +128,9 @@ _ensure_gradle_signing() {
     return
   fi
 
-  # Kiểm tra đã cấu hình chưa
-  if grep -q "keystore.properties" "$gradle_file"; then
+  # Nếu đã cấu hình ĐÚNG → skip
+  if grep -q "keystoreProperties" "$gradle_file" && \
+     grep -A5 "buildTypes" "$gradle_file" | grep -q "signingConfig"; then
     log_ok "Gradle signing đã được cấu hình"
     return
   fi
@@ -142,79 +138,76 @@ _ensure_gradle_signing() {
   log_info "Cấu hình Gradle signing config..."
   backup_file "$gradle_file"
 
-  # Dùng Node.js để sửa build.gradle (cross-platform safe)
-  node -e "
-    const fs = require('fs');
-    let content = fs.readFileSync('${gradle_file}', 'utf8');
+  # Viết Node.js script ra file tạm (tránh lỗi escape shell)
+  local tmp_script
+  tmp_script=$(mktemp)
 
-    // 1. Thêm block đọc keystore.properties TRƯỚC android {
-    const keystoreBlock = \`
-// ── Release Keystore (mobile-ci) ──────────────────────────────────
-def keystorePropertiesFile = rootProject.file('keystore.properties')
-def keystoreProperties = new Properties()
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-} else {
-    keystoreProperties['storeFile'] = System.getenv('KEYSTORE_STORE_FILE') ?: 'release-keystore.jks'
-    keystoreProperties['storePassword'] = System.getenv('KEYSTORE_PASSWORD') ?: ''
-    keystoreProperties['keyAlias'] = System.getenv('KEYSTORE_ALIAS') ?: 'release'
-    keystoreProperties['keyPassword'] = System.getenv('KEYSTORE_PASSWORD') ?: ''
+  cat > "$tmp_script" << 'NODESCRIPT'
+const fs = require('fs');
+const gf = process.argv[2];
+let c = fs.readFileSync(gf, 'utf8');
+
+// Cleanup: xóa signing config cũ bị sai nếu có
+c = c.replace(/\/\/ ── Release Keystore[\s\S]*?^}\n*/m, '');
+
+// 1. Block đọc keystore.properties — chèn TRƯỚC "android {"
+if (!c.includes('keystoreProperties')) {
+  const kb = [
+    '',
+    '// ── Release Keystore (mobile-ci) ────────────────────────────',
+    'def keystorePropertiesFile = rootProject.file("keystore.properties")',
+    'def keystoreProperties = new Properties()',
+    'if (keystorePropertiesFile.exists()) {',
+    '    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))',
+    '} else {',
+    '    keystoreProperties["storeFile"] = System.getenv("KEYSTORE_STORE_FILE") ?: "release-keystore.jks"',
+    '    keystoreProperties["storePassword"] = System.getenv("KEYSTORE_PASSWORD") ?: ""',
+    '    keystoreProperties["keyAlias"] = System.getenv("KEYSTORE_ALIAS") ?: "release"',
+    '    keystoreProperties["keyPassword"] = System.getenv("KEYSTORE_PASSWORD") ?: ""',
+    '}',
+    ''
+  ].join('\n');
+  c = c.replace(/^(android\s*\{)/m, kb + '$1');
 }
-\`;
 
-    content = content.replace(
-      /^(android\\s*\\{)/m,
-      keystoreBlock + '\\n\$1'
-    );
+// 2. signingConfigs block — chèn TRƯỚC "buildTypes {"
+if (!c.includes('signingConfigs')) {
+  const sb = [
+    '',
+    '    signingConfigs {',
+    '        release {',
+    '            storeFile file(keystoreProperties["storeFile"])',
+    '            storePassword keystoreProperties["storePassword"]',
+    '            keyAlias keystoreProperties["keyAlias"]',
+    '            keyPassword keystoreProperties["keyPassword"]',
+    '        }',
+    '    }',
+    ''
+  ].join('\n');
+  c = c.replace(/(\s*buildTypes\s*\{)/, sb + '$1');
+}
 
-    // 2. Thêm signingConfigs block TRƯỚC buildTypes
-    const signingBlock = \`
-    signingConfigs {
-        release {
-            storeFile file(keystoreProperties['storeFile'])
-            storePassword keystoreProperties['storePassword']
-            keyAlias keystoreProperties['keyAlias']
-            keyPassword keystoreProperties['keyPassword']
-        }
+// 3. signingConfig — chèn VÀO "buildTypes > release {"
+if (!c.includes('signingConfig signingConfigs.release')) {
+  const btIdx = c.indexOf('buildTypes');
+  if (btIdx !== -1) {
+    const after = c.substring(btIdx);
+    const m = after.match(/release\s*\{/);
+    if (m) {
+      const pos = btIdx + m.index + m[0].length;
+      c = c.substring(0, pos) +
+        '\n            signingConfig signingConfigs.release' +
+        c.substring(pos);
     }
-\`;
+  }
+}
 
-    if (content.includes('buildTypes')) {
-      content = content.replace(
-        /(\\s*buildTypes\\s*\\{)/,
-        signingBlock + '\$1'
-      );
-    } else {
-      content = content.replace(
-        /(android\\s*\\{)/,
-        '\$1\\n' + signingBlock
-      );
-    }
+fs.writeFileSync(gf, c);
+console.log('gradle signing configured');
+NODESCRIPT
 
-    // 3. Thêm signingConfig vào buildTypes > release block
-    //    Tìm 'buildTypes' trước, rồi tìm 'release {' bên trong
-    if (!content.includes('signingConfig signingConfigs.release')) {
-      // Tìm vị trí buildTypes block
-      const btMatch = content.match(/buildTypes\\s*\\{/);
-      if (btMatch) {
-        const btStart = content.indexOf(btMatch[0]);
-        const afterBt = content.substring(btStart);
-
-        // Tìm 'release {' trong phạm vi buildTypes
-        const releaseMatch = afterBt.match(/(release\\s*\\{)/);
-        if (releaseMatch) {
-          const releasePos = btStart + afterBt.indexOf(releaseMatch[0]);
-          const insertPos = releasePos + releaseMatch[0].length;
-          content = content.substring(0, insertPos) +
-            '\\n            signingConfig signingConfigs.release' +
-            content.substring(insertPos);
-        }
-      }
-    }
-
-    fs.writeFileSync('${gradle_file}', content);
-    process.stdout.write('done');
-  "
+  node "$tmp_script" "$gradle_file"
+  rm -f "$tmp_script"
 
   log_ok "Gradle signing config đã được cấu hình"
 }
@@ -233,15 +226,9 @@ build_android_release() {
 
   chmod +x gradlew
 
-  # Build APK
-  log_info "Building release APK..."
-  ./gradlew assembleRelease
-  log_ok "Release APK build thành công"
-
-  # Build AAB
-  log_info "Building release AAB..."
-  ./gradlew bundleRelease
-  log_ok "Release AAB build thành công"
+  log_info "Building release APK + AAB..."
+  ./gradlew assembleRelease bundleRelease
+  log_ok "Release build thành công"
 
   # Copy outputs ra thư mục build/
   local build_out="${PROJECT_ROOT}/build"
@@ -254,15 +241,8 @@ build_android_release() {
   aab_path=$(find "${PROJECT_ROOT}/android/app/build/outputs/bundle/release" \
     -name "*.aab" -type f 2>/dev/null | head -1)
 
-  if [[ -n "$apk_path" ]]; then
-    cp "$apk_path" "${build_out}/app-release.apk"
-    log_ok "APK → build/app-release.apk"
-  fi
-
-  if [[ -n "$aab_path" ]]; then
-    cp "$aab_path" "${build_out}/app-release.aab"
-    log_ok "AAB → build/app-release.aab"
-  fi
+  [[ -n "$apk_path" ]] && cp "$apk_path" "${build_out}/app-release.apk" && log_ok "APK → build/app-release.apk"
+  [[ -n "$aab_path" ]] && cp "$aab_path" "${build_out}/app-release.aab" && log_ok "AAB → build/app-release.aab"
 
   cd "$PROJECT_ROOT"
 }
