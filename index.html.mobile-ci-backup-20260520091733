@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta http-equiv="Content-Security-Policy" content="default-src * data: blob: capacitor: filesystem: 'unsafe-inline' 'unsafe-eval'; img-src * data: blob: capacitor:; media-src * data: blob: capacitor:">
     <meta charset="UTF-8" >
     <meta name="viewport" content="width=device-width, initial-scale=1.0" >
     <title>K Screens</title>
@@ -65,6 +64,7 @@
 </head><body class="overflow-x-hidden bg-zinc-950">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-
+    <script src="https://dev-cdn.vibe-x.app/injecttions/sandbox-mount-observer.js" type="module"></script>
+    <script src="https://dev-cdn.vibe-x.app/injecttions/global-error-handler-v2.js"></script>
 </body>
 </html>

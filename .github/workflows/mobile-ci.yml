@@ -1,0 +1,189 @@
+name: Mobile CI — K Screens
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Platforms to build'
+        type: choice
+        options: ['ios android', 'ios', 'android']
+        default: 'ios android'
+      skip_upload:
+        description: 'Skip TestFlight upload'
+        type: boolean
+        default: true
+
+# ── Secrets cần cấu hình (Settings → Secrets and variables → Actions) ────────
+#
+# BẮT BUỘC cho iOS signing + upload:
+#   ASC_KEY_ID          — Key ID từ App Store Connect → Users → Keys
+#   ASC_ISSUER_ID       — Issuer ID từ trang tạo key
+#   ASC_PRIVATE_KEY_B64 — base64 -i AuthKey_XXX.p8 | tr -d '\n'
+#   APPLE_TEAM_ID       — Team ID (10 ký tự) từ developer.apple.com
+#
+# TÙY CHỌN cho code signing (match):
+#   MATCH_GIT_URL       — git@github.com:org/certs.git (SSH) hoặc HTTPS
+#   MATCH_PASSWORD      — Mật khẩu encrypt match repo
+#   MATCH_SSH_KEY       — SSH private key để clone match repo
+#
+
+jobs:
+  build:
+    name: Build Mobile (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # iOS PHẢI chạy trên macOS (Xcode bắt buộc)
+          - platform: ios
+            runner: macos-latest
+          # Android chạy được trên Linux (nhanh + rẻ hơn)
+          - platform: android
+            runner: ubuntu-latest
+
+    env:
+      # ── App identity ────────────────────────────────────────────────────────
+      APP_BUNDLE_ID: kr.ailive.kscreens
+      APP_NAME: K Screens
+      APP_VERSION: "1.0.0"
+
+      # ── mobile-ci config ────────────────────────────────────────────────────
+      CAP_PLATFORMS: ${{ matrix.platform }}
+      SKIP_FASTLANE: ${{ matrix.platform == 'android' && 'true' || 'false' }}
+
+      # ── Apple / Fastlane (chỉ dùng cho iOS) ────────────────────────────────
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_CONTENT: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+
+      # ── CI flags ────────────────────────────────────────────────────────────
+      CI: "true"
+      SKIP_ASC_SETUP: "false"
+      SKIP_BUILD: "false"
+      SKIP_UPLOAD: ${{ inputs.skip_upload || 'true' }}
+
+    steps:
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 1: Checkout source
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "📥 Checkout"
+        uses: actions/checkout@v4
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 2: Setup Node.js + pnpm (cả iOS lẫn Android đều cần)
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "📦 Setup pnpm"
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: "⬢ Setup Node.js"
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 3: Install node dependencies
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "📦 Install dependencies"
+        run: pnpm install --frozen-lockfile
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 4: Setup Ruby + Bundler (chỉ iOS cần cho Fastlane)
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "💎 Setup Ruby"
+        if: matrix.platform == 'ios'
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: false   # mobile-ci tự quản lý Gemfile
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 5: Setup SSH cho Match repo (chỉ iOS, nếu có key)
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "🔑 Setup SSH for Match"
+        if: matrix.platform == 'ios' && env.MATCH_SSH_KEY != ''
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.MATCH_SSH_KEY }}
+        env:
+          MATCH_SSH_KEY: ${{ secrets.MATCH_SSH_KEY }}
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 6: Setup Android SDK (chỉ Android)
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "🤖 Setup Java"
+        if: matrix.platform == 'android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 7: Cài mobile-ci và thêm vào PATH
+      # install.sh tự detect GITHUB_PATH và thêm vào
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "🔧 Install mobile-ci"
+        run: bash mobile-ci/install.sh
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 8: Chạy mobile-ci setup
+      # Tự động: fix code → build web → add platform → cap sync → fastlane
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "🚀 Run mobile-ci setup"
+        run: mobile-ci setup
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 9: (iOS only) Chạy Fastlane CI pipeline
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "🍎 Fastlane CI Pipeline"
+        if: matrix.platform == 'ios' && env.ASC_KEY_ID != ''
+        working-directory: ${{ github.workspace }}
+        run: bundle exec fastlane ci_pipeline
+        env:
+          RELEASE_NOTES: |
+            Build #${{ github.run_number }}
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref_name }}
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 10: (Android only) Build APK
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "🤖 Build Android APK"
+        if: matrix.platform == 'android'
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      # ═══════════════════════════════════════════════════════════════════════
+      # STEP 11: Upload build artifacts
+      # ═══════════════════════════════════════════════════════════════════════
+      - name: "📤 Upload iOS IPA"
+        if: matrix.platform == 'ios' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: K-Screens-iOS-${{ github.run_number }}
+          path: build/App.ipa
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: "📤 Upload Android APK"
+        if: matrix.platform == 'android' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: K-Screens-Android-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: ignore
+          retention-days: 30

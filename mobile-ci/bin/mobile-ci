@@ -1,0 +1,320 @@
+#!/usr/bin/env bash
+# =============================================================================
+# mobile-ci — CLI entry point
+#
+# Cách dùng:
+#   mobile-ci <command> [--config path/to/mobile.config.sh] [options]
+#
+# Commands:
+#   init        Tạo mobile.config.sh trong project hiện tại
+#   setup       Chạy toàn bộ pipeline (fix → capacitor → fastlane)
+#   fix         Chỉ fix code (router, vite, html)
+#   capacitor   Chỉ setup Capacitor
+#   fastlane    Chỉ setup Fastlane
+#   sync        Chỉ chạy cap sync
+#   info        In ra cấu hình hiện tại của project
+#
+# Ví dụ:
+#   mobile-ci init                         # tạo config trong thư mục hiện tại
+#   mobile-ci setup                        # dùng ./mobile.config.sh
+#   mobile-ci setup --config ../proj.cfg   # dùng config tùy chọn
+#   CAP_PLATFORMS="ios" mobile-ci setup    # override biến
+# =============================================================================
+
+set -euo pipefail
+
+# ── Đường dẫn đến service directory ─────────────────────────────────────────
+SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# ── Source tất cả lib modules ────────────────────────────────────────────────
+for lib in "${SERVICE_DIR}/lib"/[0-9]*.sh; do
+  # shellcheck source=/dev/null
+  source "$lib"
+done
+
+# ── Parse arguments ──────────────────────────────────────────────────────────
+COMMAND="${1:-help}"
+shift || true
+
+CONFIG_FILE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --config|-c) CONFIG_FILE="$2"; shift 2 ;;
+    --project|-p) cd "$2"; shift 2 ;;
+    *) break ;;
+  esac
+done
+
+# ── Load project config ──────────────────────────────────────────────────────
+load_project_config() {
+  # Tìm config theo thứ tự ưu tiên:
+  #   1. --config <path>  (chỉ định rõ)
+  #   2. ./mobile.config.sh  (trong project root)
+  #   3. Biến môi trường đã được set sẵn (CI/CD)
+
+  local cfg="${CONFIG_FILE:-${PWD}/mobile.config.sh}"
+
+  if [[ -f "$cfg" ]]; then
+    log_info "Đọc config: $cfg"
+    # shellcheck source=/dev/null
+    source "$cfg"
+  else
+    log_warn "Không tìm thấy mobile.config.sh, dùng biến môi trường"
+  fi
+
+  # Giá trị mặc định nếu chưa có
+  PROJECT_ROOT="${PROJECT_ROOT:-$(pwd)}"
+  APP_NAME="${APP_NAME:-My App}"
+  APP_ID="${APP_ID:-com.example.myapp}"
+  WEB_DIR="${WEB_DIR:-dist}"
+  PLATFORMS="${PLATFORMS:-}"
+  BUILD_CMD="${BUILD_CMD:-}"
+  SKIP_FASTLANE="${SKIP_FASTLANE:-false}"
+  FL_APP_LANGUAGE="${FL_APP_LANGUAGE:-en-US}"
+  BACKUP_SUFFIX=".mobile-ci-backup-$(date +%Y%m%d%H%M%S)"
+  PACKAGE_MANAGER=""  # detect sau
+
+  # Override từ env vars (cho phép CI/CD override config file)
+  APP_NAME="${CAP_APP_NAME:-${APP_NAME}}"
+  APP_ID="${CAP_APP_ID:-${APP_ID}}"
+  WEB_DIR="${CAP_WEB_DIR:-${WEB_DIR}}"
+  PLATFORMS="${CAP_PLATFORMS:-${PLATFORMS}}"
+}
+
+# ── Validate project root + cài đặt prerequisites ────────────────────────────
+validate_env() {
+  require_cmd node "Cài Node.js tại https://nodejs.org"
+  require_cmd npx  ""
+
+  if [[ ! -f "${PROJECT_ROOT}/package.json" ]]; then
+    log_error "Không tìm thấy package.json tại: ${PROJECT_ROOT}"
+    log_error "Hãy chạy mobile-ci từ thư mục gốc của project"
+    exit 1
+  fi
+
+  detect_package_manager
+
+  # Tự động cài node_modules nếu chưa có (CI clean environment)
+  if [[ ! -d "${PROJECT_ROOT}/node_modules" ]]; then
+    log_info "node_modules chưa có, chạy install..."
+    cd "$PROJECT_ROOT"
+    case "${PACKAGE_MANAGER}" in
+      pnpm) pnpm install --frozen-lockfile 2>/dev/null || pnpm install ;;
+      yarn) yarn install --frozen-lockfile 2>/dev/null || yarn install ;;
+      *)    npm ci 2>/dev/null || npm install ;;
+    esac
+    log_ok "Dependencies đã được cài"
+  fi
+
+  log_info "Project: ${APP_NAME} (${APP_ID})"
+  log_info "Root:    ${PROJECT_ROOT}"
+}
+
+# ── Print summary ─────────────────────────────────────────────────────────────
+print_summary() {
+  echo ""
+  echo -e "${BOLD}${GREEN}╔═══════════════════════════════════════════════════╗${RESET}"
+  echo -e "${BOLD}${GREEN}║  ✅  mobile-ci setup hoàn tất: ${APP_NAME}${RESET}"
+  echo -e "${BOLD}${GREEN}╚═══════════════════════════════════════════════════╝${RESET}"
+  echo ""
+  echo -e "${BOLD}Kết quả:${RESET}"
+  [[ -f "${PROJECT_ROOT}/src/App.jsx" ]] && \
+    grep -q "createHashRouter" "${APP_JSX_PATH:-${PROJECT_ROOT}/src/App.jsx}" 2>/dev/null && \
+    echo -e "  ${GREEN}✓${RESET} Router: HashRouter"
+  [[ -f "${PROJECT_ROOT}/capacitor.config.json" ]] && \
+    echo -e "  ${GREEN}✓${RESET} Capacitor config"
+  [[ -d "${PROJECT_ROOT}/ios" ]] && \
+    echo -e "  ${GREEN}✓${RESET} Platform: iOS"
+  [[ -d "${PROJECT_ROOT}/android" ]] && \
+    echo -e "  ${GREEN}✓${RESET} Platform: Android"
+  [[ -f "${PROJECT_ROOT}/fastlane/Fastfile" ]] && \
+    echo -e "  ${GREEN}✓${RESET} Fastlane (6 lanes)"
+  [[ -f "${PROJECT_ROOT}/.env.fastlane.example" ]] && \
+    echo -e "  ${GREEN}✓${RESET} .env.fastlane.example"
+
+  if [[ -f "${PROJECT_ROOT}/fastlane/Fastfile" ]]; then
+    echo ""
+    echo -e "${BOLD}Bước tiếp theo (Fastlane):${RESET}"
+    echo -e "  ${CYAN}1.${RESET} cp .env.fastlane.example .env.fastlane"
+    echo -e "  ${CYAN}2.${RESET} Điền ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY_CONTENT"
+    echo -e "  ${CYAN}3.${RESET} bundle exec fastlane full_setup"
+    echo -e "  ${CYAN}4.${RESET} bundle exec fastlane ci_pipeline  # CI/CD"
+  fi
+  echo ""
+}
+
+# ── Print help ────────────────────────────────────────────────────────────────
+print_help() {
+  echo ""
+  echo -e "${BOLD}mobile-ci${RESET} — Mobile CI/CD Service"
+  echo ""
+  echo -e "${BOLD}Cách dùng:${RESET}"
+  echo "  mobile-ci <command> [options]"
+  echo ""
+  echo -e "${BOLD}Commands:${RESET}"
+  echo -e "  ${CYAN}init${RESET}        Tạo mobile.config.sh trong project hiện tại"
+  echo -e "  ${CYAN}setup${RESET}       Chạy toàn bộ: fix code + capacitor + fastlane"
+  echo -e "  ${CYAN}fix${RESET}         Chỉ fix code (router, vite.config, index.html)"
+  echo -e "  ${CYAN}capacitor${RESET}   Chỉ setup Capacitor (build + add platforms + sync)"
+  echo -e "  ${CYAN}fastlane${RESET}    Chỉ setup Fastlane (sau khi đã có platform)"
+  echo -e "  ${CYAN}sync${RESET}        Chỉ chạy cap sync"
+  echo -e "  ${CYAN}info${RESET}        Hiện thông tin cấu hình hiện tại"
+  echo ""
+  echo -e "${BOLD}Options:${RESET}"
+  echo "  --config, -c <path>   Đường dẫn đến file config (mặc định: ./mobile.config.sh)"
+  echo "  --project, -p <path>  Đường dẫn đến project root"
+  echo ""
+  echo -e "${BOLD}Ví dụ:${RESET}"
+  echo "  mobile-ci init"
+  echo "  mobile-ci setup"
+  echo "  mobile-ci setup --config /path/to/project/mobile.config.sh"
+  echo "  CAP_PLATFORMS=\"ios android\" mobile-ci setup"
+  echo "  mobile-ci fastlane --project /path/to/other-project"
+  echo ""
+  echo -e "${BOLD}Config variables:${RESET}"
+  echo "  CAP_APP_NAME, CAP_APP_ID, CAP_WEB_DIR"
+  echo "  CAP_PLATFORMS (\"ios\", \"android\", \"ios android\")"
+  echo "  SKIP_FASTLANE=true   để bỏ qua Fastlane"
+  echo ""
+}
+
+# ── Command: init ─────────────────────────────────────────────────────────────
+cmd_init() {
+  local dest="${PWD}/mobile.config.sh"
+  local template="${SERVICE_DIR}/mobile.config.template.sh"
+
+  if [[ -f "$dest" ]]; then
+    log_warn "mobile.config.sh đã tồn tại tại: $dest"
+    if [[ "${CI:-false}" == "true" ]]; then
+      # Trong CI: không hỏi, giữ nguyên file hiện tại
+      log_info "CI mode: giữ nguyên mobile.config.sh hiện tại"
+      return
+    fi
+    read -r -p "Ghi đè? [y/N] " confirm
+    [[ "${confirm,,}" != "y" ]] && { log_info "Bỏ qua."; return; }
+  fi
+
+  if [[ ! -f "$template" ]]; then
+    log_error "Không tìm thấy template: $template"
+    exit 1
+  fi
+
+  cp "$template" "$dest"
+
+  # Cố gắng auto-detect APP_NAME từ package.json
+  if [[ -f "${PWD}/package.json" ]]; then
+    local pkg_name
+    pkg_name=$(node -e "try{const p=require('./package.json');process.stdout.write(p.name||'')}catch(e){}" 2>/dev/null)
+    if [[ -n "$pkg_name" ]]; then
+      # Dùng node thay sed để tương thích cả macOS lẫn Linux (GNU sed)
+      node -e "
+        const fs = require('fs');
+        const c = fs.readFileSync('${dest}', 'utf8');
+        fs.writeFileSync('${dest}', c.replace(/My App/g, '${pkg_name}'));
+      "
+    fi
+  fi
+
+  log_ok "mobile.config.sh đã được tạo tại: $dest"
+  log_info "Hãy mở file và điền APP_NAME, APP_ID, PLATFORMS..."
+}
+
+# ── Command: info ─────────────────────────────────────────────────────────────
+cmd_info() {
+  load_project_config
+  echo ""
+  echo -e "${BOLD}Project Config:${RESET}"
+  echo -e "  APP_NAME:    ${APP_NAME}"
+  echo -e "  APP_ID:      ${APP_ID}"
+  echo -e "  PROJECT_ROOT: ${PROJECT_ROOT}"
+  echo -e "  WEB_DIR:     ${WEB_DIR}"
+  echo -e "  PLATFORMS:   ${PLATFORMS:-<chưa đặt>}"
+  echo -e "  PKG_MANAGER: $(detect_package_manager 2>/dev/null; echo "${PACKAGE_MANAGER}")"
+  echo -e "  SKIP_FASTLANE: ${SKIP_FASTLANE}"
+  echo ""
+  echo -e "${BOLD}Trạng thái:${RESET}"
+  [[ -d "${PROJECT_ROOT}/ios"     ]] && echo -e "  ${GREEN}✓${RESET} iOS platform đã add" || echo -e "  ${YELLOW}✗${RESET} iOS chưa add"
+  [[ -d "${PROJECT_ROOT}/android" ]] && echo -e "  ${GREEN}✓${RESET} Android platform đã add" || echo -e "  ${YELLOW}✗${RESET} Android chưa add"
+  [[ -f "${PROJECT_ROOT}/fastlane/Fastfile" ]] && echo -e "  ${GREEN}✓${RESET} Fastlane đã setup" || echo -e "  ${YELLOW}✗${RESET} Fastlane chưa setup"
+  [[ -f "${PROJECT_ROOT}/.env.fastlane"    ]] && echo -e "  ${GREEN}✓${RESET} .env.fastlane đã có" || echo -e "  ${YELLOW}✗${RESET} .env.fastlane chưa có"
+  echo ""
+}
+
+# ── Main dispatch ─────────────────────────────────────────────────────────────
+case "$COMMAND" in
+  init)
+    cmd_init
+    ;;
+
+  info)
+    cmd_info
+    ;;
+
+  fix)
+    load_project_config
+    validate_env
+    log_header "mobile-ci fix — ${APP_NAME}"
+    cd "$PROJECT_ROOT"
+    run_code_fixes
+    log_ok "Code fixes hoàn tất!"
+    ;;
+
+  capacitor|cap)
+    load_project_config
+    validate_env
+    log_header "mobile-ci capacitor — ${APP_NAME}"
+    cd "$PROJECT_ROOT"
+    run_code_fixes
+    run_capacitor_setup
+    run_platform_fixes
+    log_ok "Capacitor setup hoàn tất!"
+    ;;
+
+  fastlane|fl)
+    load_project_config
+    validate_env
+    log_header "mobile-ci fastlane — ${APP_NAME}"
+    cd "$PROJECT_ROOT"
+    run_fastlane_setup
+    log_ok "Fastlane setup hoàn tất!"
+    ;;
+
+  sync)
+    load_project_config
+    validate_env
+    log_header "mobile-ci sync — ${APP_NAME}"
+    cd "$PROJECT_ROOT"
+    sync_capacitor
+    ;;
+
+  setup)
+    load_project_config
+    validate_env
+    log_header "mobile-ci setup — ${APP_NAME}"
+    cd "$PROJECT_ROOT"
+
+    # Bước 1: Fix code
+    run_code_fixes
+
+    # Bước 2: Capacitor (build + platforms + sync)
+    run_capacitor_setup
+
+    # Bước 3: Platform-specific fixes
+    run_platform_fixes
+
+    # Bước 4: Fastlane (SAU KHI platforms đã add)
+    run_fastlane_setup
+
+    print_summary
+    ;;
+
+  help|--help|-h|"")
+    print_help
+    ;;
+
+  *)
+    log_error "Lệnh không hợp lệ: '$COMMAND'"
+    print_help
+    exit 1
+    ;;
+esac
