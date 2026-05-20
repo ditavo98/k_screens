@@ -107,11 +107,16 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 4: Setup Ruby + Bundler (Cần cho Fastlane ở cả iOS và Android)
       # ═══════════════════════════════════════════════════════════════════════
+      # ═══════════════════════════════════════════════════════════════════════
       - name: "💎 Setup Ruby"
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.2'
           bundler-cache: false   # mobile-ci tự quản lý Gemfile
+
+      - name: "📦 Install CocoaPods"
+        if: matrix.platform == 'ios'
+        run: gem install cocoapods -NV
 
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 5: Setup SSH cho Match repo (chỉ iOS, nếu có key)
@@ -145,12 +150,8 @@ jobs:
       # STEP 8: Chạy mobile-ci setup
       # Tự động: fix code → build web → add platform → cap sync → fastlane
       # ═══════════════════════════════════════════════════════════════════════
-      # ═══════════════════════════════════════════════════════════════════════
       - name: "🚀 Run mobile-ci setup"
-        run: |
-          # Force regenerate fastlane configs to apply latest template fixes
-          rm -rf fastlane Gemfile Gemfile.lock
-          mobile-ci setup
+        run: mobile-ci setup
 
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 8.5: Commit generated files (android/, ios/, keystore, etc.)
