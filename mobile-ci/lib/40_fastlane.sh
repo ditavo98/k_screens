@@ -249,7 +249,11 @@ require "json"
 require "base64"
 require "time"
 
-# ── Helper: đọc ASC API key ─────────────────────────────────────────────────
+before_all do
+  setup_ci if ENV["CI"]
+end
+
+# Load App Store Connect API Key ─────────────────────────────────────────────────
 def asc_api_key
   content = ENV["ASC_PRIVATE_KEY_CONTENT"]
   # Nếu base64-encoded (thường dùng trong CI/CD secrets)
@@ -389,8 +393,19 @@ lane :build_ios do |opts|
     setup_signing(bundle_id: bundle_id, type: "appstore") unless opts[:skip_signing]
   end
 
+  export_opts = {}
+  if ENV["MATCH_GIT_URL"] && !ENV["MATCH_GIT_URL"].empty?
+    export_opts = { provisioningProfiles: { bundle_id => "match AppStore #{bundle_id}" } }
+  end
+
+  xc_args = nil
+  if ENV["APPLE_TEAM_ID"] && !ENV["APPLE_TEAM_ID"].empty?
+    xc_args = "DEVELOPMENT_TEAM=#{ENV["APPLE_TEAM_ID"]}"
+  end
+
   gym(
-    scheme:            opts[:scheme] || ENV["IOS_SCHEME"] || "${IOS_SCHEME:-App}",
+    workspace:         "ios/App/App.xcworkspace",
+    scheme:            opts[:scheme] || ENV["IOS_SCHEME"] || "App",
     configuration:     opts[:config] || ENV["BUILD_CONFIG"] || "Release",
     export_method:     "app-store",
     output_directory:  "build",
@@ -398,8 +413,8 @@ lane :build_ios do |opts|
     clean:             true,
     include_symbols:   true,
     include_bitcode:   false,
-    xcargs:            "DEVELOPMENT_TEAM=#{ENV["APPLE_TEAM_ID"]}",
-    export_options:    { provisioningProfiles: { bundle_id => "match AppStore #{bundle_id}" } },
+    xcargs:            xc_args,
+    export_options:    export_opts,
   )
   UI.success("✅ Build xong: build/App.ipa")
 end

@@ -145,8 +145,12 @@ jobs:
       # STEP 8: Chạy mobile-ci setup
       # Tự động: fix code → build web → add platform → cap sync → fastlane
       # ═══════════════════════════════════════════════════════════════════════
+      # ═══════════════════════════════════════════════════════════════════════
       - name: "🚀 Run mobile-ci setup"
-        run: mobile-ci setup
+        run: |
+          # Force regenerate fastlane configs to apply latest template fixes
+          rm -rf fastlane Gemfile Gemfile.lock
+          mobile-ci setup
 
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 8.5: Commit generated files (android/, ios/, keystore, etc.)
@@ -230,11 +234,11 @@ jobs:
           # Decode JSON key từ base64
           echo "$GOOGLE_PLAY_JSON_KEY" | base64 --decode > /tmp/play-store-key.json
 
-          # Cài fastlane nếu chưa có
-          bundle install --jobs 4 --retry 3
+          # Cài fastlane trực tiếp (vì Android không có Gemfile)
+          sudo gem install fastlane -NV
 
           # Upload AAB lên Google Play (internal track)
-          bundle exec fastlane supply \
+          fastlane supply \
             --aab android/app/build/outputs/bundle/release/app-release.aab \
             --json_key /tmp/play-store-key.json \
             --package_name "$APP_BUNDLE_ID" \
