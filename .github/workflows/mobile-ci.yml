@@ -11,24 +11,18 @@ on:
         description: 'Platforms to build'
         type: choice
         options: ['ios android', 'ios', 'android']
-        default: 'ios android'
+        default: 'ios'
       skip_upload:
         description: 'Skip TestFlight upload'
         type: boolean
-        default: true
+        default: false
 
-# ── Secrets cần cấu hình (Settings → Secrets and variables → Actions) ────────
+# ── Cấu hình cho Self-hosted Runner (Mac) ────────
 #
-# BẮT BUỘC cho iOS signing + upload:
-#   ASC_KEY_ID          — Key ID từ App Store Connect → Users → Keys
-#   ASC_ISSUER_ID       — Issuer ID từ trang tạo key
-#   ASC_PRIVATE_KEY_B64 — base64 -i AuthKey_XXX.p8 | tr -d '\n'
-#   APPLE_TEAM_ID       — Team ID (10 ký tự) từ developer.apple.com
-#
-# TÙY CHỌN cho code signing (match):
-#   MATCH_GIT_URL       — git@github.com:org/certs.git (SSH) hoặc HTTPS
-#   MATCH_PASSWORD      — Mật khẩu encrypt match repo
-#   MATCH_SSH_KEY       — SSH private key để clone match repo
+# Đảm bảo bạn đã cấu hình các thông tin sau trong file .env của Runner:
+#   - ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY_PATH, APPLE_TEAM_ID
+#   - GOOGLE_PLAY_KEY_PATH
+# Và đã cấu hình SSH Key truy cập repo chứng chỉ trực tiếp trên máy Mac.
 #
 
 permissions:
@@ -37,40 +31,23 @@ permissions:
 jobs:
   build:
     name: Build Mobile (${{ matrix.platform }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: self-hosted
     timeout-minutes: 60
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          # iOS PHẢI chạy trên macOS (Xcode bắt buộc)
           - platform: ios
-            runner: macos-latest
-          # Android chạy được trên Linux (nhanh + rẻ hơn)
           - platform: android
-            runner: ubuntu-latest
 
     env:
-      # ── App identity ────────────────────────────────────────────────────────
-      APP_BUNDLE_ID: com.kscreens.app
-      APP_NAME: K Screens
-      APP_VERSION: "1.0.0"
-
       # ── mobile-ci config ────────────────────────────────────────────────────
       CAP_PLATFORMS: ${{ matrix.platform }}
       SKIP_FASTLANE: ${{ matrix.platform == 'android' && 'true' || 'false' }}
 
-      # ── Google Play (chỉ dùng cho Android) ──────────────────────────────
-      GOOGLE_PLAY_JSON_KEY: ${{ secrets.GOOGLE_PLAY_JSON_KEY_B64 }}
-
-      # ── Apple / Fastlane (chỉ dùng cho iOS) ────────────────────────────────
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      ASC_PRIVATE_KEY_CONTENT: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      MATCH_GIT_URL: ${{ secrets.MATCH_GIT_URL }}
-      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      # (Lưu ý: Các credentials bảo mật như App Store Connect Key, 
+      # Google Play Key đã được lưu trữ và nạp tự động từ .env của Self-hosted Runner)
 
       # ── CI flags ────────────────────────────────────────────────────────────
       CI: "true"
@@ -117,17 +94,6 @@ jobs:
       - name: "📦 Install CocoaPods"
         if: matrix.platform == 'ios'
         run: gem install cocoapods -NV
-
-      # ═══════════════════════════════════════════════════════════════════════
-      # STEP 5: Setup SSH cho Match repo (chỉ iOS, nếu có key)
-      # ═══════════════════════════════════════════════════════════════════════
-      - name: "🔑 Setup SSH for Match"
-        if: matrix.platform == 'ios' && env.MATCH_SSH_KEY != ''
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.MATCH_SSH_KEY }}
-        env:
-          MATCH_SSH_KEY: ${{ secrets.MATCH_SSH_KEY }}
 
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 6: Setup Android SDK (chỉ Android)
@@ -202,12 +168,11 @@ jobs:
             done
             echo "✅ Đã commit và push generated files"
           fi
-
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 9: (iOS only) Chạy Fastlane CI pipeline
       # ═══════════════════════════════════════════════════════════════════════
       - name: "🍎 Fastlane CI Pipeline"
-        if: matrix.platform == 'ios' && env.ASC_KEY_ID != ''
+        if: matrix.platform == 'ios'
         working-directory: ${{ github.workspace }}
         run: bundle exec fastlane ci_pipeline
         env:
@@ -230,18 +195,16 @@ jobs:
       # STEP 10.5: (Android only) Upload lên Google Play via Fastlane
       # ═══════════════════════════════════════════════════════════════════════
       - name: "🚀 Upload Google Play"
-        if: matrix.platform == 'android' && env.GOOGLE_PLAY_JSON_KEY != '' && env.SKIP_UPLOAD != 'true'
+        if: matrix.platform == 'android' && env.SKIP_UPLOAD != 'true'
         run: |
-          # Decode JSON key từ base64
-          echo "$GOOGLE_PLAY_JSON_KEY" | base64 --decode > /tmp/play-store-key.json
-
           # Cài fastlane trực tiếp (vì Android không có Gemfile)
           sudo gem install fastlane -NV
 
           # Upload AAB lên Google Play (internal track)
+          # Biến GOOGLE_PLAY_KEY_PATH lấy trực tiếp từ .env của máy Mac
           fastlane supply \
             --aab android/app/build/outputs/bundle/release/app-release.aab \
-            --json_key /tmp/play-store-key.json \
+            --json_key "$GOOGLE_PLAY_KEY_PATH" \
             --package_name "$APP_BUNDLE_ID" \
             --track internal \
             --skip_upload_metadata \
@@ -250,8 +213,6 @@ jobs:
             --skip_upload_screenshots \
             --skip_upload_apk
 
-          # Xóa key sau khi dùng
-          rm -f /tmp/play-store-key.json
           echo "✅ Upload Google Play (internal) thành công!"
 
       # ═══════════════════════════════════════════════════════════════════════

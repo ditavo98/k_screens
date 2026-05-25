@@ -185,13 +185,8 @@ cmd_init() {
 
   if [[ -f "$dest" ]]; then
     log_warn "mobile.config.sh đã tồn tại tại: $dest"
-    if [[ "${CI:-false}" == "true" ]]; then
-      # Trong CI: không hỏi, giữ nguyên file hiện tại
-      log_info "CI mode: giữ nguyên mobile.config.sh hiện tại"
-      return
-    fi
-    read -r -p "Ghi đè? [y/N] " confirm
-    [[ "${confirm,,}" != "y" ]] && { log_info "Bỏ qua."; return; }
+    log_info "Giữ nguyên file hiện tại (không ghi đè để tránh dừng CI)."
+    return
   fi
 
   if [[ ! -f "$template" ]]; then

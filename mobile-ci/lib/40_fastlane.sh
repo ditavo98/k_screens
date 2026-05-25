@@ -312,9 +312,9 @@ lane :create_app do |opts|
 
   create_bundle_id(bundle_id: bundle_id, name: app_name)
 
-  # Set API key globally
+  # Set API key globally cho fastlane actions
   key = asc_api_key
-  api_key = app_store_connect_api_key(
+  app_store_connect_api_key(
     key_id:         key[:key_id],
     issuer_id:      key[:issuer_id],
     key_content:    key[:key_content],
@@ -323,32 +323,13 @@ lane :create_app do |opts|
     in_house:       false,
   )
 
-  # Dùng Spaceship::ConnectAPI trực tiếp (produce không hỗ trợ API key)
-  require "spaceship"
-  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(**api_key)
-
-  # Kiểm tra app đã tồn tại chưa
-  existing = Spaceship::ConnectAPI::App.find(bundle_id)
-  if existing
-    UI.important("App '#{bundle_id}' đã tồn tại trên ASC, bỏ qua tạo mới")
-  else
-    begin
-      Spaceship::ConnectAPI::App.create(
-        name:               app_name,
-        bundle_id:          bundle_id,
-        sku:                sku,
-        primary_locale:     language,
-        platform:           Spaceship::ConnectAPI::Platform::IOS,
-      )
-      UI.success("✅ App đã được tạo trên App Store Connect!")
-    rescue => e
-      if e.message.include?("ENTITY_ALREADY_EXISTS") || e.message.include?("already exists")
-        UI.important("App đã tồn tại, tiếp tục...")
-      else
-        UI.user_error!("Tạo app thất bại: #{e.message}")
-      end
-    end
-  end
+  # Sử dụng action produce tiêu chuẩn (có hỗ trợ ASC API Key tự động từ app_store_connect_api_key)
+  produce(
+    app_name: app_name,
+    app_identifier: bundle_id,
+    sku: sku,
+    language: language
+  )
 end
 
 # ── LANE: setup_signing ──────────────────────────────────────────────────────
