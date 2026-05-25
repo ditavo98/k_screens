@@ -327,7 +327,7 @@ lane :create_app do |opts|
   bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
   app_name  = opts[:app_name]  || ENV["APP_NAME"]      || "${APP_NAME}"
   sku       = opts[:sku]       || ENV["APP_SKU"]        || bundle_id.gsub(".", "-")
-  language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-en-US}"
+  language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-English}"
 
   register_bundle_id(bundle_id: bundle_id, name: app_name)
   # Dùng ASC API Key để kiểm tra — không cần session
@@ -358,7 +358,7 @@ lane :create_app do |opts|
       app_name:       app_name,
       language:       language,
       app_version:    ENV["APP_VERSION"] || "1.0.0",
-      sku:            'sku',
+      sku:            sku,
       platform:       "ios",
       team_name:      ENV["APPLE_TEAM_NAME"] || "",
       itc_team_name:  ENV["ITC_TEAM_NAME"]   || ENV["APPLE_TEAM_NAME"] || "",
