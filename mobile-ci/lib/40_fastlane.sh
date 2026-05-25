@@ -237,11 +237,12 @@ _fl_create_fastfile() {
       sed -i.bak 's/create_bundle_id unless/register_bundle_id unless/g' "$fastfile"
       rm -f "${fastfile}.bak"
     fi
-    if grep -q 'produce(' "$fastfile" && ! grep -q 'username:' "$fastfile"; then
-      log_info "Auto-patch: Thêm username và skip_devcenter vào produce"
-      sed -i.bak 's/produce(/produce(\n    username: ENV\["APPLE_ID"\],\n    skip_devcenter: true,/g' "$fastfile"
+    if grep -q 'produce(' "$fastfile" && grep -q 'username:' "$fastfile"; then
+      log_info "Auto-patch: Xóa username khỏi produce để ép dùng API Key"
+      sed -i.bak '/username:/d' "$fastfile"
       rm -f "${fastfile}.bak"
-    elif grep -q 'produce(' "$fastfile" && ! grep -q 'skip_devcenter: true' "$fastfile"; then
+    fi
+    if grep -q 'produce(' "$fastfile" && ! grep -q 'skip_devcenter: true' "$fastfile"; then
       log_info "Auto-patch: Thêm skip_devcenter: true vào produce"
       sed -i.bak 's/produce(/produce(\n    skip_devcenter: true,/g' "$fastfile"
       rm -f "${fastfile}.bak"
@@ -352,7 +353,6 @@ lane :create_app do |opts|
   # Sử dụng action produce tiêu chuẩn (có hỗ trợ ASC API Key tự động từ app_store_connect_api_key)
   produce(
     skip_devcenter: true,
-    username: ENV["APPLE_ID"],
     app_name: app_name,
     app_identifier: bundle_id,
     sku: sku,
