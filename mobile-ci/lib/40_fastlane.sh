@@ -329,7 +329,7 @@ lane :create_app do |opts|
   sku       = opts[:sku]       || ENV["APP_SKU"]        || bundle_id.gsub(".", "-")
   language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-en-US}"
 
-  register_bundle_id(bundle_id: bundle_id, name: app_name)
+  # register_bundle_id(bundle_id: bundle_id, name: app_name)
 
   if ENV["FASTLANE_SESSION"] && !ENV["FASTLANE_SESSION"].empty?
     UI.important("🔑 Đã tìm thấy FASTLANE_SESSION, sử dụng produce để tạo App...")
