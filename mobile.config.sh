@@ -4,7 +4,7 @@
 
 # ── Thông tin App ────────────────────────────────────────────────────────────
 APP_NAME="K Screens"
-APP_ID="com.kscreens.app"
+APP_ID="ai.kscreens.app"
 APP_VERSION="${APP_VERSION:-1.0.0}"
 
 # ── Capacitor ────────────────────────────────────────────────────────────────
@@ -13,7 +13,7 @@ WEB_DIR="dist"
 BUILD_CMD=""
 
 # Domains cho phép trong WebView
-CAP_ALLOW_NAVIGATION="*.youtube.com,*.googleapis.com,*.google.com"
+CAP_ALLOW_NAVIGATION="*.youtube.com,*.googleapis.com,*.google.com,*.ailive.kr"
 
 # UI
 CAP_SPLASH_BG="#09090b"
