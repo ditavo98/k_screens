@@ -346,10 +346,6 @@ lane :create_app do |opts|
       itc_team_name:  ENV["ITC_TEAM_NAME"]   || ENV["APPLE_TEAM_NAME"] || "",
       skip_itc:       false,
       skip_devcenter: false,
-      enable_services: {
-        push_notification: "on",
-        associated_domains: "on",
-      },
     )
 
     UI.success("✅ App tạo thành công!")
