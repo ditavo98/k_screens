@@ -51,8 +51,10 @@ _fl_create_appfile() {
 # Đọc từ biến môi trường CI/CD
 app_identifier(ENV["APP_BUNDLE_ID"] || "${APP_ID}")
 apple_id(ENV["APPLE_ID"] || "")
+# team_id là Apple Developer Portal Team ID (ví dụ: ATVBX8XSBD)
 team_id(ENV["APPLE_TEAM_ID"] || "")
-itc_team_id(ENV["ITC_TEAM_ID"] || ENV["APPLE_TEAM_ID"] || "")
+# itc_team_id là App Store Connect Team ID (ví dụ: 126561332)
+itc_team_id(ENV["ITC_TEAM_ID"] || ENV["APPLE_TEAM_ID_NUM"] || "")
 EOF
   log_ok "fastlane/Appfile đã được tạo"
 }
