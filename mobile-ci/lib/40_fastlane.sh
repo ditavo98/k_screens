@@ -247,6 +247,14 @@ _fl_create_fastfile() {
       sed -i.bak 's/produce(/produce(\n    skip_devcenter: true,/g' "$fastfile"
       rm -f "${fastfile}.bak"
     fi
+    if grep -q 'produce(' "$fastfile" && ! grep -q 'ENV\["APPLE_ID"\] = nil' "$fastfile"; then
+      log_info "Auto-patch: Xóa sạch ENV APPLE_ID trước khi gọi produce"
+      sed -i.bak '/produce(/i\
+    ENV["APPLE_ID"] = nil\
+    ENV["FASTLANE_USER"] = nil\
+' "$fastfile"
+      rm -f "${fastfile}.bak"
+    fi
     return
   }
 
@@ -350,6 +358,10 @@ lane :create_app do |opts|
     in_house:       false,
   )
 
+  # Đảm bảo Fastlane không cố dùng APPLE_ID để đăng nhập Spaceship (tránh lỗi Missing password)
+  ENV["APPLE_ID"] = nil
+  ENV["FASTLANE_USER"] = nil
+  
   # Sử dụng action produce tiêu chuẩn (có hỗ trợ ASC API Key tự động từ app_store_connect_api_key)
   produce(
     skip_devcenter: true,
