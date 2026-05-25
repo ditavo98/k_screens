@@ -244,11 +244,6 @@ _fl_create_fastfile() {
       sed -i.bak '/username:/d' "$fastfile"
       rm -f "${fastfile}.bak"
     fi
-    if grep -q 'produce(' "$fastfile" && ! grep -q 'skip_devcenter: true' "$fastfile"; then
-      log_info "Auto-patch: Thêm skip_devcenter: true vào produce"
-      sed -i.bak 's/produce(/produce(\n    skip_devcenter: true,/g' "$fastfile"
-      rm -f "${fastfile}.bak"
-    fi
     if grep -q 'produce(' "$fastfile" && ! grep -q 'ENV\["APPLE_ID"\] = nil' "$fastfile"; then
       log_info "Auto-patch: Xóa sạch ENV APPLE_ID trước khi gọi produce"
       sed -i.bak '/produce(/i\
@@ -357,7 +352,6 @@ lane :create_app do |opts|
     ENV["APPLE_ID"] = ENV["APPLE_ID"] || "" 
     
     produce(
-      skip_devcenter: true,
       app_name: app_name,
       app_identifier: bundle_id,
       sku: sku,
