@@ -246,7 +246,7 @@ _fl_create_fastfile() {
 #   bundle exec fastlane full_setup         → Toàn bộ flow lần đầu
 #   bundle exec fastlane ci_pipeline        → CI/CD tự động
 #
-# Biến môi trường bắt buộc (xem .env.fastlane.example):
+# Biến môi trường bắt buộc (xem .env của Runner / .env.runner.example):
 #   ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY_CONTENT
 #   APP_BUNDLE_ID, APP_NAME, APPLE_ID, APPLE_TEAM_ID
 # =============================================================================
@@ -486,74 +486,6 @@ FFEOF
 }
 
 # --------------------------------------------------------------------------- #
-# Tạo .env.fastlane.example
-# --------------------------------------------------------------------------- #
-_fl_create_env_example() {
-  local env_file="${PROJECT_ROOT}/.env.fastlane.example"
-  [[ -f "$env_file" ]] && { log_ok ".env.fastlane.example đã tồn tại"; return; }
-
-  log_info "Tạo .env.fastlane.example..."
-  cat > "$env_file" << EOF
-# =============================================================================
-# Biến môi trường cho Fastlane — ${APP_NAME}
-# Tạo bởi mobile-ci service
-#
-# Sao chép: cp .env.fastlane.example .env.fastlane
-# ĐỪNG commit .env.fastlane lên git!
-# =============================================================================
-
-# ── App Store Connect API Key ─────────────────────────────────────────────────
-# Tạo tại: https://appstoreconnect.apple.com → Users & Access → Keys
-ASC_KEY_ID=XXXXXXXXXX
-ASC_ISSUER_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-# Nội dung .p8 encode base64 (dùng cho CI/CD secrets):
-# base64 -i AuthKey_XXXXXXXXXX.p8 | tr -d '\\n'
-ASC_PRIVATE_KEY_CONTENT=LS0tLS1CRUdJTi...
-# Hoặc path đến file .p8 nếu chạy local:
-# ASC_PRIVATE_KEY_PATH=fastlane/asc_private_key.p8
-
-# ── Apple Developer Account ───────────────────────────────────────────────────
-APPLE_ID=your@email.com
-APPLE_TEAM_ID=XXXXXXXXXX
-ITC_TEAM_ID=XXXXXXXXXX
-
-# ── App ───────────────────────────────────────────────────────────────────────
-APP_BUNDLE_ID=${APP_ID}
-APP_NAME=${APP_NAME}
-APP_VERSION=1.0.0
-APP_SKU=${APP_ID}-001
-APP_LANGUAGE=${FL_APP_LANGUAGE:-ko}
-
-# ── Match (Code Signing) ──────────────────────────────────────────────────────
-MATCH_GIT_URL=git@github.com:your-org/certs.git
-MATCH_GIT_BRANCH=main
-MATCH_PASSWORD=your-encryption-password
-MATCH_TYPE=appstore
-
-# ── Build ─────────────────────────────────────────────────────────────────────
-IOS_SCHEME=${IOS_SCHEME:-App}
-BUILD_CONFIG=Release
-RELEASE_NOTES=Phiên bản mới
-
-# ── CI Flags ──────────────────────────────────────────────────────────────────
-# SKIP_ASC_SETUP=false
-# SKIP_BUILD=false
-# SKIP_UPLOAD=false
-
-# ── Notifications ─────────────────────────────────────────────────────────────
-# SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-EOF
-  log_ok ".env.fastlane.example đã được tạo"
-
-  # Cập nhật .gitignore
-  local gitignore="${PROJECT_ROOT}/.gitignore"
-  if [[ -f "$gitignore" ]] && ! grep -q "\.env\.fastlane$" "$gitignore"; then
-    printf '\n# mobile-ci: Fastlane secrets\n.env.fastlane\nfastlane/asc_private_key.p8\nfastlane/bundle_id_result.json\n' >> "$gitignore"
-    log_ok ".gitignore đã được cập nhật"
-  fi
-}
-
-# --------------------------------------------------------------------------- #
 # Chạy bundle install
 # --------------------------------------------------------------------------- #
 _fl_bundle_install() {
@@ -601,7 +533,6 @@ run_fastlane_setup() {
   _fl_create_appfile
   _fl_create_asc_action
   _fl_create_fastfile
-  _fl_create_env_example
   _fl_bundle_install
 
   log_ok "Fastlane setup hoàn tất!"

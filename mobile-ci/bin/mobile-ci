@@ -129,16 +129,12 @@ print_summary() {
     echo -e "  ${GREEN}✓${RESET} Platform: Android"
   [[ -f "${PROJECT_ROOT}/fastlane/Fastfile" ]] && \
     echo -e "  ${GREEN}✓${RESET} Fastlane (6 lanes)"
-  [[ -f "${PROJECT_ROOT}/.env.fastlane.example" ]] && \
-    echo -e "  ${GREEN}✓${RESET} .env.fastlane.example"
 
   if [[ -f "${PROJECT_ROOT}/fastlane/Fastfile" ]]; then
     echo ""
     echo -e "${BOLD}Bước tiếp theo (Fastlane):${RESET}"
-    echo -e "  ${CYAN}1.${RESET} cp .env.fastlane.example .env.fastlane"
-    echo -e "  ${CYAN}2.${RESET} Điền ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY_CONTENT"
-    echo -e "  ${CYAN}3.${RESET} bundle exec fastlane full_setup"
-    echo -e "  ${CYAN}4.${RESET} bundle exec fastlane ci_pipeline  # CI/CD"
+    echo -e "  ${CYAN}1.${RESET} bundle exec fastlane full_setup"
+    echo -e "  ${CYAN}2.${RESET} bundle exec fastlane ci_pipeline  # CI/CD"
   fi
   echo ""
 }
