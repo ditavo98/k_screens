@@ -227,7 +227,22 @@ RBEOF
 # --------------------------------------------------------------------------- #
 _fl_create_fastfile() {
   local fastfile="${PROJECT_ROOT}/fastlane/Fastfile"
-  [[ -f "$fastfile" ]] && { log_ok "Fastfile đã tồn tại"; return; }
+  [[ -f "$fastfile" ]] && { 
+    log_ok "Fastfile đã tồn tại"
+    # Auto-patch Fastfile cũ
+    if grep -q 'lane :create_bundle_id' "$fastfile"; then
+      log_info "Auto-patch: Đổi tên lane create_bundle_id -> register_bundle_id trong Fastfile cũ"
+      sed -i.bak 's/lane :create_bundle_id/lane :register_bundle_id/g' "$fastfile"
+      sed -i.bak 's/create_bundle_id(/register_bundle_id(/g' "$fastfile"
+      rm -f "${fastfile}.bak"
+    fi
+    if grep -q 'produce(' "$fastfile" && ! grep -q 'username:' "$fastfile"; then
+      log_info "Auto-patch: Thêm username: ENV[\"APPLE_ID\"] vào produce"
+      sed -i.bak 's/produce(/produce(\n    username: ENV\["APPLE_ID"\],/g' "$fastfile"
+      rm -f "${fastfile}.bak"
+    fi
+    return
+  }
 
   log_info "Tạo fastlane/Fastfile..."
 
@@ -281,8 +296,8 @@ def asc_api_key
   }
 end
 
-# ── LANE: create_bundle_id ───────────────────────────────────────────────────
-lane :create_bundle_id do |opts|
+# ── LANE: register_bundle_id ───────────────────────────────────────────────────
+lane :register_bundle_id do |opts|
   UI.header("🆔 Tạo Bundle ID qua ASC API")
   bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
   name      = opts[:name]      || ENV["APP_NAME"]      || "${APP_NAME}"
@@ -316,7 +331,7 @@ lane :create_app do |opts|
   sku       = opts[:sku]       || ENV["APP_SKU"]        || bundle_id.gsub(".", "-")
   language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-ko}"
 
-  create_bundle_id(bundle_id: bundle_id, name: app_name)
+  register_bundle_id(bundle_id: bundle_id, name: app_name)
 
   # Set API key globally cho fastlane actions
   key = asc_api_key
@@ -331,6 +346,7 @@ lane :create_app do |opts|
 
   # Sử dụng action produce tiêu chuẩn (có hỗ trợ ASC API Key tự động từ app_store_connect_api_key)
   produce(
+    username: ENV["APPLE_ID"],
     app_name: app_name,
     app_identifier: bundle_id,
     sku: sku,
