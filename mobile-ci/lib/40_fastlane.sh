@@ -12,6 +12,11 @@ _fl_create_gemfile() {
 
   if [[ -f "$gemfile" ]] && grep -q 'fastlane' "$gemfile"; then
     log_ok "Gemfile đã chứa fastlane"
+    if ! grep -q 'gem "json"' "$gemfile"; then
+      log_info "Auto-patch: Thêm gem json >= 2.7.2 vào Gemfile cũ và xoá lockfile"
+      echo 'gem "json", ">= 2.7.2"' >> "$gemfile"
+      rm -f "${PROJECT_ROOT}/Gemfile.lock"
+    fi
     return
   fi
 
