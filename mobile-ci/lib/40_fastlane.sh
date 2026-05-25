@@ -476,8 +476,19 @@ end
 # ── LANE: release_testflight ─────────────────────────────────────────────────
 lane :release_testflight do |opts|
   UI.header("🚀 Upload lên TestFlight")
+  
+  key = asc_api_key
+  api_key_result = app_store_connect_api_key(
+    key_id:                key[:key_id],
+    issuer_id:             key[:issuer_id],
+    key_content:           key[:key_content],
+    is_key_content_base64: false,
+    duration:              1200,
+    in_house:              false,
+  )
+
   pilot(
-    api_key:                           asc_api_key,
+    api_key:                           api_key_result,
     ipa:                               opts[:ipa_path] || "build/App.ipa",
     skip_waiting_for_build_processing: true,
     distribute_external:               false,
