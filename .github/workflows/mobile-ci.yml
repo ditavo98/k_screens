@@ -12,10 +12,6 @@ on:
         type: choice
         options: ['ios android', 'ios', 'android']
         default: 'ios'
-      skip_upload:
-        description: 'Skip TestFlight upload'
-        type: boolean
-        default: false
 
 # ── Cấu hình cho Self-hosted Runner (Mac) ────────
 #
@@ -45,7 +41,6 @@ jobs:
     env:
       # ── mobile-ci config ────────────────────────────────────────────────────
       CAP_PLATFORMS: ${{ matrix.platform }}
-      SKIP_FASTLANE: ${{ matrix.platform == 'android' && 'true' || 'false' }}
 
       # (Lưu ý: Các credentials bảo mật như App Store Connect Key, 
       # Google Play Key đã được lưu trữ và nạp tự động từ .env của Self-hosted Runner)
@@ -54,7 +49,7 @@ jobs:
       CI: "true"
       SKIP_ASC_SETUP: "false"
       SKIP_BUILD: "false"
-      SKIP_UPLOAD: ${{ inputs.skip_upload || 'false' }}
+      SKIP_UPLOAD: "false"
 
     steps:
       # ═══════════════════════════════════════════════════════════════════════
@@ -209,15 +204,6 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 11: Upload build artifacts
       # ═══════════════════════════════════════════════════════════════════════
-      - name: "📤 Upload iOS IPA"
-        if: matrix.platform == 'ios' && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: K-Screens-iOS-${{ github.run_number }}
-          path: build/App.ipa
-          if-no-files-found: ignore
-          retention-days: 30
-
       - name: "📤 Upload Android APK"
         if: matrix.platform == 'android' && always()
         uses: actions/upload-artifact@v4
