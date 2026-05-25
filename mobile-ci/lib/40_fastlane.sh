@@ -415,7 +415,18 @@ lane :build_ios do |opts|
 
   if ENV["MATCH_GIT_URL"].nil? || ENV["MATCH_GIT_URL"].empty?
     UI.important("⚠️ Bỏ qua setup_signing vì MATCH_GIT_URL trống. Sẽ cố gắng build Xcode mà không dùng Match...")
+    UI.important("👉 Bật Automatically manage signing trong Xcode project...")
+    update_code_signing_settings(
+      use_automatic_signing: true,
+      path: "ios/App/App.xcodeproj",
+      team_id: ENV["APPLE_TEAM_ID"]
+    )
   else
+    # Tắt Auto Signing nếu đang dùng Match
+    update_code_signing_settings(
+      use_automatic_signing: false,
+      path: "ios/App/App.xcodeproj"
+    )
     setup_signing(bundle_id: bundle_id, type: "appstore") unless opts[:skip_signing]
   end
 
