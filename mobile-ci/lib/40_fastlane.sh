@@ -234,11 +234,16 @@ _fl_create_fastfile() {
       log_info "Auto-patch: Đổi tên lane create_bundle_id -> register_bundle_id trong Fastfile cũ"
       sed -i.bak 's/lane :create_bundle_id/lane :register_bundle_id/g' "$fastfile"
       sed -i.bak 's/create_bundle_id(/register_bundle_id(/g' "$fastfile"
+      sed -i.bak 's/create_bundle_id unless/register_bundle_id unless/g' "$fastfile"
       rm -f "${fastfile}.bak"
     fi
     if grep -q 'produce(' "$fastfile" && ! grep -q 'username:' "$fastfile"; then
-      log_info "Auto-patch: Thêm username: ENV[\"APPLE_ID\"] vào produce"
-      sed -i.bak 's/produce(/produce(\n    username: ENV\["APPLE_ID"\],/g' "$fastfile"
+      log_info "Auto-patch: Thêm username và skip_devcenter vào produce"
+      sed -i.bak 's/produce(/produce(\n    username: ENV\["APPLE_ID"\],\n    skip_devcenter: true,/g' "$fastfile"
+      rm -f "${fastfile}.bak"
+    elif grep -q 'produce(' "$fastfile" && ! grep -q 'skip_devcenter: true' "$fastfile"; then
+      log_info "Auto-patch: Thêm skip_devcenter: true vào produce"
+      sed -i.bak 's/produce(/produce(\n    skip_devcenter: true,/g' "$fastfile"
       rm -f "${fastfile}.bak"
     fi
     return
@@ -346,6 +351,7 @@ lane :create_app do |opts|
 
   # Sử dụng action produce tiêu chuẩn (có hỗ trợ ASC API Key tự động từ app_store_connect_api_key)
   produce(
+    skip_devcenter: true,
     username: ENV["APPLE_ID"],
     app_name: app_name,
     app_identifier: bundle_id,
@@ -478,9 +484,9 @@ end
 # ── LANE: ci_pipeline ────────────────────────────────────────────────────────
 lane :ci_pipeline do
   UI.header("⚙️  CI Pipeline — ${APP_NAME}")
-  create_bundle_id unless ENV["SKIP_ASC_SETUP"] == "true"
-  create_app       unless ENV["SKIP_ASC_SETUP"] == "true"
-  build_ios        unless ENV["SKIP_BUILD"]     == "true"
+  register_bundle_id unless ENV["SKIP_ASC_SETUP"] == "true"
+  create_app         unless ENV["SKIP_ASC_SETUP"] == "true"
+  build_ios          unless ENV["SKIP_BUILD"]     == "true"
   release_testflight(
     changelog: ENV["RELEASE_NOTES"] || "CI build - \#{Time.now.strftime('%Y-%m-%d %H:%M')}",
   ) unless ENV["SKIP_UPLOAD"] == "true"
