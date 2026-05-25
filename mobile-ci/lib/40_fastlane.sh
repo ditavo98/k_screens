@@ -54,7 +54,7 @@ apple_id(ENV["APPLE_ID"] || "")
 # team_id là Apple Developer Portal Team ID (ví dụ: ATVBX8XSBD)
 team_id(ENV["APPLE_TEAM_ID"] || "")
 # itc_team_id là App Store Connect Team ID (ví dụ: 126561332)
-itc_team_id(ENV["ITC_TEAM_ID"] || ENV["APPLE_TEAM_ID_NUM"] || "")
+itc_team_id(ENV["ITC_TEAM_ID"] || "")
 EOF
   log_ok "fastlane/Appfile đã được tạo"
 }
@@ -239,19 +239,6 @@ _fl_create_fastfile() {
       sed -i.bak 's/create_bundle_id unless/register_bundle_id unless/g' "$fastfile"
       rm -f "${fastfile}.bak"
     fi
-    if grep -q 'produce(' "$fastfile" && grep -q 'username:' "$fastfile"; then
-      log_info "Auto-patch: Xóa username khỏi produce để ép dùng API Key"
-      sed -i.bak '/username:/d' "$fastfile"
-      rm -f "${fastfile}.bak"
-    fi
-    if grep -q 'produce(' "$fastfile" && ! grep -q 'ENV\["APPLE_ID"\] = nil' "$fastfile"; then
-      log_info "Auto-patch: Xóa sạch ENV APPLE_ID trước khi gọi produce"
-      sed -i.bak '/produce(/i\
-    ENV["APPLE_ID"] = nil\
-    ENV["FASTLANE_USER"] = nil\
-' "$fastfile"
-      rm -f "${fastfile}.bak"
-    fi
     return
   }
 
@@ -340,49 +327,37 @@ lane :create_app do |opts|
   bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
   app_name  = opts[:app_name]  || ENV["APP_NAME"]      || "${APP_NAME}"
   sku       = opts[:sku]       || ENV["APP_SKU"]        || bundle_id.gsub(".", "-")
-  language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-ko}"
+  language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-en-US}"
 
   register_bundle_id(bundle_id: bundle_id, name: app_name)
 
-  # Nếu có FASTLANE_SESSION (từ lệnh fastlane spaceauth), dùng produce
   if ENV["FASTLANE_SESSION"] && !ENV["FASTLANE_SESSION"].empty?
     UI.important("🔑 Đã tìm thấy FASTLANE_SESSION, sử dụng produce để tạo App...")
-    
-    # Cần set lại APPLE_ID nếu bị thiếu
-    ENV["APPLE_ID"] = ENV["APPLE_ID"] || "" 
-    
-    produce(
-      app_name: app_name,
+
+    create_app_online(
+      username:       ENV["APPLE_ID"],
       app_identifier: bundle_id,
-      sku: sku,
-      language: language
-    )
-    UI.success("✅ App tạo thành công bằng produce (qua FASTLANE_SESSION)!")
-  else
-    # Không có session => Kiểm tra qua Connect API xem đã tồn tại chưa
-    key = asc_api_key
-    api_key = app_store_connect_api_key(
-      key_id:                key[:key_id],
-      issuer_id:             key[:issuer_id],
-      key_content:           key[:key_content],
-      is_key_content_base64: false,
-      duration:              1200,
-      in_house:              false,
+      app_name:       app_name,
+      language:       language,
+      app_version:    ENV["APP_VERSION"] || "1.0",
+      sku:            sku,
+      platform:       "ios",
+      team_name:      ENV["APPLE_TEAM_NAME"] || "",
+      itc_team_name:  ENV["ITC_TEAM_NAME"]   || ENV["APPLE_TEAM_NAME"] || "",
+      skip_itc:       false,
+      skip_devcenter: false,
+      enable_services: {
+        push_notification: "on",
+        associated_domains: "on",
+      },
     )
 
-    begin
-      Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key)
-      app = Spaceship::ConnectAPI::App.find(bundle_id)
-      if app
-        UI.success("✅ App đã tồn tại trên App Store Connect: #{bundle_id}")
-      else
-        UI.important("⚠️ Ứng dụng chưa được tạo trên App Store Connect!")
-        UI.important("🚨 Apple App Store Connect API Key KHÔNG HỖ TRỢ tính năng tạo mới App.")
-        UI.user_error!("Vui lòng cung cấp FASTLANE_SESSION (fastlane spaceauth) HOẶC tạo thủ công App trên web (https://appstoreconnect.apple.com).")
-      end
-    rescue => e
-      UI.user_error!("Lỗi kiểm tra app trên ASC: #{e.message}")
-    end
+    UI.success("✅ App tạo thành công!")
+  else
+    UI.important("⚠️ Không có FASTLANE_SESSION!")
+    UI.important("Chạy: bundle exec fastlane spaceauth -u your@apple.com")
+    UI.important("Hoặc tạo thủ công tại https://appstoreconnect.apple.com")
+    UI.user_error!("Thiếu FASTLANE_SESSION để tạo app mới.")
   end
 end
 
