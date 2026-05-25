@@ -50,11 +50,23 @@ _fl_create_appfile() {
 # Appfile — ${APP_NAME}
 # Đọc từ biến môi trường CI/CD
 app_identifier(ENV["APP_BUNDLE_ID"] || "${APP_ID}")
-apple_id(ENV["APPLE_ID"] || "")
 team_id(ENV["APPLE_TEAM_ID"] || "")
 itc_team_id(ENV["ITC_TEAM_ID"] || ENV["APPLE_TEAM_ID"] || "")
+# apple_id — bỏ dòng này để tránh Spaceship auth khi dùng ASC API Key
 EOF
   log_ok "fastlane/Appfile đã được tạo"
+}
+
+_fl_patch_appfile() {
+  local appfile="${PROJECT_ROOT}/fastlane/Appfile"
+  [[ ! -f "$appfile" ]] && return
+
+  if grep -q '^apple_id' "$appfile"; then
+    log_info "Auto-patch Appfile: Comment out apple_id để tránh Spaceship auth"
+    sed -i.bak 's/^apple_id/# apple_id/' "$appfile"
+    rm -f "${appfile}.bak"
+    log_ok "Appfile đã được patch"
+  fi
 }
 
 # --------------------------------------------------------------------------- #
@@ -347,29 +359,36 @@ lane :create_app do |opts|
 
   register_bundle_id(bundle_id: bundle_id, name: app_name)
 
-  # Set API key globally cho fastlane actions
+  # Dùng Spaceship 2.0 qua ASC API — không cần produce
   key = asc_api_key
-  app_store_connect_api_key(
-    key_id:         key[:key_id],
-    issuer_id:      key[:issuer_id],
-    key_content:    key[:key_content],
+  api_key = app_store_connect_api_key(
+    key_id:                key[:key_id],
+    issuer_id:             key[:issuer_id],
+    key_content:           key[:key_content],
     is_key_content_base64: false,
-    duration:       1200,
-    in_house:       false,
+    duration:              1200,
+    in_house:              false,
   )
 
-  # Đảm bảo Fastlane không cố dùng APPLE_ID để đăng nhập Spaceship (tránh lỗi Missing password)
-  ENV["APPLE_ID"] = nil
-  ENV["FASTLANE_USER"] = nil
-  
-  # Sử dụng action produce tiêu chuẩn (có hỗ trợ ASC API Key tự động từ app_store_connect_api_key)
-  produce(
-    skip_devcenter: true,
-    app_name: app_name,
-    app_identifier: bundle_id,
-    sku: sku,
-    language: language
-  )
+  begin
+    Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key)
+    app = Spaceship::ConnectAPI::App.find(bundle_id)
+    if app
+      UI.important("App đã tồn tại trên ASC: #{bundle_id}")
+    else
+      app = Spaceship::ConnectAPI::App.create(
+        name:               app_name,
+        version_string:     "1.0",
+        sku:                sku,
+        primary_locale:     language,
+        bundle_id:          bundle_id,
+        platforms:          ["IOS"],
+      )
+      UI.success("✅ App tạo thành công: #{app_name} (#{bundle_id})")
+    end
+  rescue => e
+    UI.user_error!("Lỗi tạo app: #{e.message}")
+  end
 end
 
 # ── LANE: setup_signing ──────────────────────────────────────────────────────
@@ -564,6 +583,7 @@ run_fastlane_setup() {
   fi
 
   _fl_create_gemfile
+  _fl_patch_appfile
   _fl_create_appfile
   _fl_create_asc_action
   _fl_create_fastfile
