@@ -330,6 +330,24 @@ lane :create_app do |opts|
   language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-en-US}"
 
   register_bundle_id(bundle_id: bundle_id, name: app_name)
+  # Dùng ASC API Key để kiểm tra — không cần session
+  key = asc_api_key
+  api_key = app_store_connect_api_key(
+    key_id:                key[:key_id],
+    issuer_id:             key[:issuer_id],
+    key_content:           key[:key_content],
+    is_key_content_base64: false,
+    duration:              1200,
+    in_house:              false,
+  )
+  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key)
+
+  existing_app = Spaceship::ConnectAPI::App.find(bundle_id)
+  if existing_app
+    UI.success("✅ App đã tồn tại trên ASC: #{bundle_id}")
+    next
+  end
+  
 
   if ENV["FASTLANE_SESSION"] && !ENV["FASTLANE_SESSION"].empty?
     UI.important("🔑 Đã tìm thấy FASTLANE_SESSION, sử dụng produce để tạo App...")
