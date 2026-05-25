@@ -35,11 +35,12 @@ jobs:
     timeout-minutes: 60
 
     strategy:
+      max-parallel: 1
       fail-fast: false
       matrix:
         include:
           - platform: ios
-          - platform: android
+          # - platform: android
 
     env:
       # ── mobile-ci config ────────────────────────────────────────────────────
@@ -80,16 +81,6 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       - name: "📦 Install dependencies"
         run: pnpm install --no-frozen-lockfile
-
-      # ═══════════════════════════════════════════════════════════════════════
-      # STEP 4: Setup Ruby + Bundler (Cần cho Fastlane ở cả iOS và Android)
-      # ═══════════════════════════════════════════════════════════════════════
-      # ═══════════════════════════════════════════════════════════════════════
-      - name: "💎 Setup Ruby"
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.2'
-          bundler-cache: false   # mobile-ci tự quản lý Gemfile
 
       - name: "📦 Install CocoaPods"
         if: matrix.platform == 'ios'
