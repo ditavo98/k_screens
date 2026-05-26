@@ -36,7 +36,7 @@ jobs:
       matrix:
         include:
           - platform: ios
-          # - platform: android
+          - platform: android
 
     env:
       # ── mobile-ci config ────────────────────────────────────────────────────
