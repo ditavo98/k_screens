@@ -114,8 +114,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Thêm từng path riêng (tránh 1 path lỗi → fail hết)
+          # Stage từng path riêng
           for path in \
             package.json \
             pnpm-lock.yaml \
@@ -134,26 +133,45 @@ jobs:
             fi
           done
 
-          # Debug: hiển thị những gì đã staged
           echo ""
           echo "── Staged files ──"
           git diff --cached --stat || true
           echo ""
 
-          # Chỉ commit nếu có thay đổi
           if git diff --cached --quiet; then
             echo "✅ Không có file mới cần commit"
-          else
-            git commit -m "chore: auto-generate ${{ matrix.platform }} platform files [skip ci]"
-
-            # Push với retry (2 matrix jobs có thể push cùng lúc)
-            for i in 1 2 3; do
-              git pull --rebase origin main && git push && break
-              echo "⏳ Push lần $i thất bại, retry sau 5s..."
-              sleep 5
-            done
-            echo "✅ Đã commit và push generated files"
+            exit 0
           fi
+          git commit -m "chore: auto-generate ${{ matrix.platform }} platform files [skip ci]"
+          # Push với retry
+          PUSHED=false
+          for i in 1 2 3; do
+            echo "⏳ Push attempt $i..."
+
+            # Debug unstaged changes trước khi pull
+            echo "── Unstaged changes ──"
+            git status --short || true
+
+            # Cất unstaged/untracked changes để pull --rebase không bị chặn
+            git stash --include-untracked || true
+
+            if git pull --rebase origin main; then
+              git stash pop || true
+              if git push; then
+                PUSHED=true
+                break
+              fi
+            else
+              git stash pop || true
+            fi
+            echo "⏳ Push lần $i thất bại, retry sau 10s..."
+            sleep 10
+          done
+          if [ "$PUSHED" = false ]; then
+            echo "❌ Push thất bại sau 3 lần retry"
+            exit 1
+          fi
+          echo "✅ Đã commit và push thành công"
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 9: (iOS only) Chạy Fastlane CI pipeline
       # ═══════════════════════════════════════════════════════════════════════
@@ -183,11 +201,20 @@ jobs:
       - name: "🚀 Upload Google Play"
         if: matrix.platform == 'android' && env.SKIP_UPLOAD != 'true'
         run: |
-          # Cài fastlane trực tiếp (vì Android không có Gemfile)
-          sudo gem install fastlane -NV
+          echo "── Kiểm tra môi trường ──"
+          which ruby && ruby --version
+          which gem && gem --version
+          echo "GOOGLE_PLAY_KEY_PATH=$GOOGLE_PLAY_KEY_PATH"
+          echo "APP_BUNDLE_ID=$APP_BUNDLE_ID"
+          ls -lh android/app/build/outputs/bundle/release/ || echo "❌ Không tìm thấy AAB"
 
-          # Upload AAB lên Google Play (internal track)
-          # Biến GOOGLE_PLAY_KEY_PATH lấy trực tiếp từ .env của máy Mac
+          echo ""
+          echo "── Cài fastlane ──"
+          sudo gem install fastlane -NV 2>&1
+          which fastlane && fastlane --version
+
+          echo ""
+          echo "── Upload Google Play ──"
           fastlane supply \
             --aab android/app/build/outputs/bundle/release/app-release.aab \
             --json_key "$GOOGLE_PLAY_KEY_PATH" \
@@ -197,7 +224,8 @@ jobs:
             --skip_upload_changelogs \
             --skip_upload_images \
             --skip_upload_screenshots \
-            --skip_upload_apk
+            --skip_upload_apk \
+            --verbose 2>&1
 
           echo "✅ Upload Google Play (internal) thành công!"
 

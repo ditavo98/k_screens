@@ -327,11 +327,11 @@ lane :release_testflight do |opts|
     beta_app_description:              "${APP_NAME}",
     demo_account_required:             false,
     beta_app_review_info: {
-      contact_email: "dita.vo@metacrew.vn"
+      contact_email: "dita.vo@metacrew.vn",
       contact_first_name: "DEV",
       contact_last_name: "PlanB",
       contact_phone: "+84981531110",
-      demo_account_required: false
+      demo_account_required: false,
     },
   )
   UI.success("✅ Upload TestFlight thành công!")
