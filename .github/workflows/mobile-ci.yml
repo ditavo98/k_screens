@@ -57,6 +57,9 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       - name: "📥 Checkout"
         uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 2: Setup Node.js + pnpm (cả iOS lẫn Android đều cần)
@@ -105,73 +108,25 @@ jobs:
       - name: "🚀 Run mobile-ci setup"
         run: mobile-ci setup
 
-      # ═══════════════════════════════════════════════════════════════════════
-      # STEP 8.5: Commit generated files (android/, ios/, keystore, etc.)
-      # Chỉ commit khi có file mới — lần sau sẽ skip tạo lại
-      # ═══════════════════════════════════════════════════════════════════════
-      - name: "📝 Commit generated files"
+      # ── Lưu generated files để commit-job dùng ──────────────────────────
+      - name: "💾 Upload generated files as artifact"
         if: github.event_name == 'push'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Stage từng path riêng
-          for path in \
-            package.json \
-            pnpm-lock.yaml \
-            android/ \
-            ios/ \
-            capacitor.config.json \
-            fastlane/ \
-            Gemfile \
-            Gemfile.lock \
-            .env.fastlane.example; do
-            if [ -e "$path" ]; then
-              git add -f "$path"
-              echo "  ✓ Staged: $path"
-            else
-              echo "  ✗ Skip (không tồn tại): $path"
-            fi
-          done
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-${{ matrix.platform }}-${{ github.run_number }}
+          # Chỉ upload những gì thực sự thay đổi
+          path: |
+            package.json
+            pnpm-lock.yaml
+            capacitor.config.json
+            Gemfile
+            Gemfile.lock
+            android/
+            ios/
+            fastlane/
+          if-no-files-found: ignore
+          retention-days: 1
 
-          echo ""
-          echo "── Staged files ──"
-          git diff --cached --stat || true
-          echo ""
-
-          if git diff --cached --quiet; then
-            echo "✅ Không có file mới cần commit"
-            exit 0
-          fi
-          git commit -m "chore: auto-generate ${{ matrix.platform }} platform files [skip ci]"
-          # Push với retry
-          PUSHED=false
-          for i in 1 2 3; do
-            echo "⏳ Push attempt $i..."
-
-            # Debug unstaged changes trước khi pull
-            echo "── Unstaged changes ──"
-            git status --short || true
-
-            # Cất unstaged/untracked changes để pull --rebase không bị chặn
-            git stash --include-untracked || true
-
-            if git pull --rebase origin main; then
-              git stash pop || true
-              if git push; then
-                PUSHED=true
-                break
-              fi
-            else
-              git stash pop || true
-            fi
-            echo "⏳ Push lần $i thất bại, retry sau 10s..."
-            sleep 10
-          done
-          if [ "$PUSHED" = false ]; then
-            echo "❌ Push thất bại sau 3 lần retry"
-            exit 1
-          fi
-          echo "✅ Đã commit và push thành công"
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 9: (iOS only) Chạy Fastlane CI pipeline
       # ═══════════════════════════════════════════════════════════════════════
@@ -225,7 +180,7 @@ jobs:
             --skip_upload_images \
             --skip_upload_screenshots \
             --skip_upload_apk \
-            --verbose 2>&1
+            --verbose 2>&1        # <-- stream toàn bộ log ra stdout
 
           echo "✅ Upload Google Play (internal) thành công!"
 
@@ -249,3 +204,88 @@ jobs:
           path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: ignore
           retention-days: 30
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # JOB RIÊNG: Commit tất cả generated files SAU KHI cả 2 build job xong
+  # Chạy 1 lần duy nhất → không bao giờ conflict
+  # ══════════════════════════════════════════════════════════════════════════
+  commit-generated:
+    name: "📝 Commit generated files"
+    needs: build
+    runs-on: self-hosted
+    if: github.event_name == 'push'
+
+    steps:
+      - name: "📥 Checkout (bản mới nhất)"
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: "📥 Download iOS generated files"
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-ios-${{ github.run_number }}
+          path: .
+        continue-on-error: true   # iOS job có thể đã skip
+
+      - name: "📥 Download Android generated files"
+        uses: actions/download-artifact@v4
+        with:
+          name: generated-android-${{ github.run_number }}
+          path: .
+        continue-on-error: true   # Android job có thể đã skip
+
+      - name: "💾 Commit & push"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          for path in \
+            package.json \
+            pnpm-lock.yaml \
+            android/ \
+            ios/ \
+            capacitor.config.json \
+            fastlane/ \
+            Gemfile \
+            Gemfile.lock \
+            .env.fastlane.example; do
+            if [ -e "$path" ]; then
+              git add -f "$path"
+              echo "  ✓ Staged: $path"
+            else
+              echo "  ✗ Skip: $path"
+            fi
+          done
+
+          echo "── Staged files ──"
+          git diff --cached --stat || true
+
+          if git diff --cached --quiet; then
+            echo "✅ Không có thay đổi cần commit"
+            exit 0
+          fi
+
+          git commit -m "chore: auto-generate platform files [skip ci]"
+
+          # Push với retry — job này chạy 1 lần duy nhất nên ít conflict hơn
+          PUSHED=false
+          for i in 1 2 3; do
+            echo "⏳ Push attempt $i..."
+            if git pull --rebase origin main && git push origin main; then
+              PUSHED=true
+              break
+            fi
+            git rebase --abort 2>/dev/null || true
+            echo "⏳ Retry sau 10s..."
+            sleep 10
+          done
+
+          if [ "$PUSHED" = false ]; then
+            echo "❌ Push thất bại sau 3 lần retry"
+            exit 1
+          fi
+
+          echo "✅ Đã commit và push thành công"
+
