@@ -4,11 +4,7 @@
   "webDir": "dist",
   "server": {
     "androidScheme": "https",
-    "allowNavigation": [
-      "*.youtube.com",
-      "*.googleapis.com",
-      "*.google.com"
-    ]
+    "allowNavigation": ["*.youtube.com","*.googleapis.com","*.google.com","*.ailive.kr"]
   },
   "plugins": {
     "SplashScreen": {

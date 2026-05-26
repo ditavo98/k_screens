@@ -7,7 +7,8 @@
 		"allowNavigation": [
 			"*.youtube.com",
 			"*.googleapis.com",
-			"*.google.com"
+			"*.google.com",
+			"*.ailive.kr"
 		]
 	},
 	"plugins": {
@@ -28,6 +29,5 @@
 	"android": {
 		"allowMixedContent": true,
 		"captureInput": true
-	},
-	"packageClassList": []
+	}
 }

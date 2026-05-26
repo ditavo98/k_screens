@@ -78,6 +78,7 @@ jobs:
       # STEP 3: Install node dependencies
       # ═══════════════════════════════════════════════════════════════════════
       - name: "📦 Install dependencies"
+        working-directory: project
         run: pnpm install --no-frozen-lockfile
 
       - name: "📦 Install CocoaPods"
@@ -106,7 +107,8 @@ jobs:
       # Tự động: fix code → build web → add platform → cap sync → fastlane
       # ═══════════════════════════════════════════════════════════════════════
       - name: "🚀 Run mobile-ci setup"
-        run: mobile-ci setup
+        working-directory: project
+        run: mobile-ci setup --config ../mobile-ci/mobile.config.sh
 
       # ── Lưu generated files để commit-job dùng ──────────────────────────
       - name: "💾 Upload generated files as artifact"
@@ -116,14 +118,14 @@ jobs:
           name: generated-${{ matrix.platform }}-${{ github.run_number }}
           # Chỉ upload những gì thực sự thay đổi
           path: |
-            package.json
-            pnpm-lock.yaml
-            capacitor.config.json
-            Gemfile
-            Gemfile.lock
-            android/
-            ios/
-            fastlane/
+            project/package.json
+            project/pnpm-lock.yaml
+            project/capacitor.config.json
+            project/Gemfile
+            project/Gemfile.lock
+            project/android/
+            project/ios/
+            project/fastlane/
           if-no-files-found: ignore
           retention-days: 1
 
@@ -132,7 +134,7 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       - name: "🍎 Fastlane CI Pipeline"
         if: matrix.platform == 'ios'
-        working-directory: ${{ github.workspace }}
+        working-directory: ${{ github.workspace }}/project
         run: bundle exec fastlane ci_pipeline
         env:
           RELEASE_NOTES: |
@@ -145,7 +147,7 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       - name: "🤖 Build Android Release"
         if: matrix.platform == 'android'
-        working-directory: android
+        working-directory: project/android
         run: |
           chmod +x gradlew
           ./gradlew assembleRelease bundleRelease
@@ -155,12 +157,13 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       - name: "🚀 Upload Google Play"
         if: matrix.platform == 'android' && env.SKIP_UPLOAD != 'true'
+        working-directory: project
         run: |
           echo "── Kiểm tra môi trường ──"
           which ruby && ruby --version
           which gem && gem --version
         
-          source mobile.config.sh
+          source ../mobile-ci/mobile.config.sh
           echo "GOOGLE_PLAY_KEY_PATH=$GOOGLE_PLAY_KEY_PATH"
           echo "APP_ID=$APP_ID"
           ls -lh android/app/build/outputs/bundle/release/ || echo "❌ Không tìm thấy AAB"
@@ -189,7 +192,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: K-Screens-Android-APK-${{ github.run_number }}
-          path: android/app/build/outputs/apk/release/*.apk
+          path: project/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: ignore
           retention-days: 30
 
@@ -198,7 +201,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: K-Screens-Android-AAB-${{ github.run_number }}
-          path: android/app/build/outputs/bundle/release/*.aab
+          path: project/android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: ignore
           retention-days: 30
 
@@ -239,15 +242,15 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           for path in \
-            package.json \
-            pnpm-lock.yaml \
-            android/ \
-            ios/ \
-            capacitor.config.json \
-            fastlane/ \
-            Gemfile \
-            Gemfile.lock \
-            .env.fastlane.example; do
+            project/package.json \
+            project/pnpm-lock.yaml \
+            project/android/ \
+            project/ios/ \
+            project/capacitor.config.json \
+            project/fastlane/ \
+            project/Gemfile \
+            project/Gemfile.lock \
+            project/.env.fastlane.example; do
             if [ -e "$path" ]; then
               git add -f "$path"
               echo "  ✓ Staged: $path"
