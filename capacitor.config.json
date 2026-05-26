@@ -1,5 +1,5 @@
 {
-  "appId": "com.kscreens.app",
+  "appId": "ai.kscreens.app",
   "appName": "K Screens",
   "webDir": "dist",
   "server": {

@@ -1,0 +1,8 @@
+# Appfile — K Screens
+# Đọc từ biến môi trường CI/CD
+app_identifier(ENV["APP_BUNDLE_ID"] || "ai.kscreens.app")
+apple_id(ENV["APPLE_ID"] || "")
+# team_id là Apple Developer Portal Team ID (ví dụ: ATVBX8XSBD)
+team_id(ENV["APPLE_TEAM_ID"] || "")
+# itc_team_id là App Store Connect Team ID (ví dụ: 126561332)
+itc_team_id(ENV["ITC_TEAM_ID"] || "")

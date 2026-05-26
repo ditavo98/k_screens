@@ -13,6 +13,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/core": "^8.3.4",
+    "@capacitor/ios": "^8.3.4",
     "@hello-pangea/dnd": "^17.0.0",
     "@hookform/resolvers": "^4.1.2",
     "@radix-ui/react-accordion": "^1.2.3",
@@ -90,6 +92,7 @@
     "@babel/parser": "^7.29.3",
     "@babel/traverse": "^7.29.0",
     "@babel/types": "^7.29.0",
+    "@capacitor/cli": "^8.3.4",
     "@eslint/js": "^9.19.0",
     "@types/node": "^22.13.5",
     "@types/react": "^18.2.66",
