@@ -11,8 +11,6 @@ export default defineConfig(({ mode }) => {
   const isProduction = env.VITE_APP_ENV === 'production';
 
   return {
-    // mobile-ci: base path cho Capacitor native build
-    base: './',
     plugins: [
       react(),
       ...(!isProduction

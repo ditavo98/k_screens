@@ -7,7 +7,7 @@ import VisualEditAgent from "@/lib/VisualEditAgent";
 import NavigationTracker from "@/lib/NavigationTracker";
 import { pagesConfig } from "./pages.config";
 import {
-  createHashRouter,
+  createBrowserRouter,
   RouterProvider,
   Route,
   Routes,
@@ -125,8 +125,7 @@ function RootShell() {
   );
 }
 
-// mobile-ci: HashRouter bắt buộc cho Capacitor (file:// protocol)
-const router = createHashRouter([
+const router = createBrowserRouter([
   {
     path: "*",
     element: <RootShell />,
