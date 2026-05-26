@@ -3,8 +3,8 @@
 # Được tạo bởi: mobile-ci init
 
 # ── Thông tin App ────────────────────────────────────────────────────────────
-APP_NAME="K Screen"
-APP_ID="com.kscreens.app"
+APP_NAME="K Screens"
+APP_ID="ai.kscreens.app"
 APP_VERSION="${APP_VERSION:-1.0.0}"
 
 # ── Capacitor ────────────────────────────────────────────────────────────────

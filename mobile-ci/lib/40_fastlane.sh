@@ -59,170 +59,6 @@ EOF
   log_ok "fastlane/Appfile đã được tạo"
 }
 
-# --------------------------------------------------------------------------- #
-# Tạo fastlane/actions/create_bundle_id.rb
-# Custom action gọi ASC REST API để tạo Bundle ID
-# --------------------------------------------------------------------------- #
-_fl_create_asc_action() {
-  local dir="${PROJECT_ROOT}/fastlane/actions"
-  mkdir -p "$dir"
-
-  local file="${dir}/create_bundle_id.rb"
-  [[ -f "$file" ]] && { log_ok "create_bundle_id.rb đã tồn tại"; return; }
-
-  log_info "Tạo fastlane/actions/create_bundle_id.rb..."
-  cat > "$file" << 'RBEOF'
-# fastlane/actions/create_bundle_id.rb
-#
-# Custom Fastlane action: Tạo Bundle ID trên Apple Developer Portal
-# qua App Store Connect REST API v1
-#
-# Xác thực bằng JWT ES256 — không cần Apple ID / password.
-# Docs: https://developer.apple.com/documentation/appstoreconnectapi
-#
-require "net/http"
-require "json"
-require "openssl"
-require "base64"
-require "time"
-
-module Fastlane
-  module Actions
-    class CreateBundleIdAction < Action
-
-      # ── Tạo JWT token (ES256) ──────────────────────────────────────────────
-      def self.generate_jwt(key_id:, issuer_id:, key_content:)
-        header  = { alg: "ES256", kid: key_id, typ: "JWT" }
-        now     = Time.now.to_i
-        payload = {
-          iss: issuer_id,
-          iat: now,
-          exp: now + 1200,  # tối đa 20 phút
-          aud: "appstoreconnect-v1",
-        }
-
-        private_key = OpenSSL::PKey::EC.new(key_content)
-        b64         = ->(d) { Base64.urlsafe_encode64(d, padding: false) }
-        input       = "#{b64.(header.to_json)}.#{b64.(payload.to_json)}"
-
-        # Sign → DER/ASN.1 → raw R||S (64 bytes)
-        digest   = OpenSSL::Digest::SHA256.new
-        asn1_sig = private_key.sign(digest, input)
-        asn1     = OpenSSL::ASN1.decode(asn1_sig)
-        r        = asn1.value[0].value.to_s(2).rjust(32, "\x00")[-32..]
-        s        = asn1.value[1].value.to_s(2).rjust(32, "\x00")[-32..]
-
-        "#{input}.#{b64.(r + s)}"
-      end
-
-      # ── POST /v1/bundleIds ─────────────────────────────────────────────────
-      def self.run(params)
-        token = generate_jwt(
-          key_id:      params[:api_key_id],
-          issuer_id:   params[:api_issuer_id],
-          key_content: params[:api_key_content],
-        )
-
-        body = {
-          data: {
-            type:       "bundleIds",
-            attributes: {
-              identifier: params[:bundle_id],
-              name:       params[:name],
-              platform:   params[:platform] || "IOS",
-            },
-          },
-        }.to_json
-
-        resp = call_api("POST", "https://api.appstoreconnect.apple.com/v1/bundleIds", token, body)
-        data = JSON.parse(resp.body)
-
-        case resp.code.to_i
-        when 201
-          attrs = data.dig("data", "attributes") || {}
-          UI.success("[ASC] Bundle ID tạo thành công: #{attrs['identifier']}")
-          {
-            success:    true,
-            id:         data.dig("data", "id"),
-            identifier: attrs["identifier"],
-            name:       attrs["name"],
-            platform:   attrs["platform"],
-          }
-        when 409
-          # ENTITY_ALREADY_EXISTS — không phải lỗi
-          UI.important("[ASC] Bundle ID đã tồn tại, đang lấy thông tin...")
-          get_existing_bundle_id(token, params[:bundle_id])
-        else
-          msg = data.dig("errors", 0, "detail") ||
-                data.dig("errors", 0, "title")  ||
-                resp.body
-          UI.error("[ASC] Lỗi #{resp.code}: #{msg}")
-          { success: false, error: msg }
-        end
-      rescue => e
-        UI.error("[ASC] Exception: #{e.message}")
-        { success: false, error: e.message }
-      end
-
-      # ── GET /v1/bundleIds?filter[identifier]=... ───────────────────────────
-      def self.get_existing_bundle_id(token, identifier)
-        url  = "https://api.appstoreconnect.apple.com/v1/bundleIds?filter[identifier]=#{URI.encode_www_form_component(identifier)}"
-        resp = call_api("GET", url, token)
-        data = JSON.parse(resp.body)
-        rec  = data.dig("data", 0)
-        return { success: false, error: "Bundle ID not found after 409" } unless rec
-
-        attrs = rec["attributes"] || {}
-        UI.success("[ASC] Bundle ID tìm thấy: #{attrs['identifier']}")
-        {
-          success:    true,
-          id:         rec["id"],
-          identifier: attrs["identifier"],
-          name:       attrs["name"],
-          platform:   attrs["platform"],
-        }
-      end
-
-      # ── HTTP helper ────────────────────────────────────────────────────────
-      def self.call_api(method, url, token, body = nil)
-        uri  = URI(url)
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl      = true
-        http.read_timeout = 30
-
-        req = Net::HTTP.const_get(method.capitalize).new(uri)
-        req["Authorization"] = "Bearer #{token}"
-        req["Content-Type"]  = "application/json"
-        req.body = body if body
-        http.request(req)
-      end
-
-      def self.description
-        "Tạo Bundle ID trên Apple Developer Portal qua App Store Connect REST API"
-      end
-
-      def self.available_options
-        [
-          FastlaneCore::ConfigItem.new(key: :api_key_id,      description: "Key ID từ ASC",           type: String),
-          FastlaneCore::ConfigItem.new(key: :api_issuer_id,   description: "Issuer ID từ ASC",         type: String),
-          FastlaneCore::ConfigItem.new(key: :api_key_content, description: "Nội dung file .p8",        type: String, sensitive: true),
-          FastlaneCore::ConfigItem.new(key: :bundle_id,       description: "Bundle Identifier",        type: String),
-          FastlaneCore::ConfigItem.new(key: :name,            description: "Tên Bundle ID",            type: String),
-          FastlaneCore::ConfigItem.new(key: :platform,        description: "IOS hoặc MAC_OS",          type: String, default_value: "IOS"),
-        ]
-      end
-
-      def self.return_value
-        "Hash: { success, id, identifier, name, platform } hoặc { success: false, error }"
-      end
-
-      def self.is_supported?(platform) = platform == :ios
-    end
-  end
-end
-RBEOF
-  log_ok "fastlane/actions/create_bundle_id.rb đã được tạo"
-}
 
 # --------------------------------------------------------------------------- #
 # Tạo fastlane/Fastfile — render từ biến PROJECT_ROOT, APP_ID, APP_NAME, v.v.
@@ -231,14 +67,7 @@ _fl_create_fastfile() {
   local fastfile="${PROJECT_ROOT}/fastlane/Fastfile"
   [[ -f "$fastfile" ]] && { 
     log_ok "Fastfile đã tồn tại"
-    # Auto-patch Fastfile cũ
-    if grep -q 'lane :create_bundle_id' "$fastfile"; then
-      log_info "Auto-patch: Đổi tên lane create_bundle_id -> register_bundle_id trong Fastfile cũ"
-      sed -i.bak 's/lane :create_bundle_id/lane :register_bundle_id/g' "$fastfile"
-      sed -i.bak 's/create_bundle_id(/register_bundle_id(/g' "$fastfile"
-      sed -i.bak 's/create_bundle_id unless/register_bundle_id unless/g' "$fastfile"
-      rm -f "${fastfile}.bak"
-    fi
+
     return
   }
 
@@ -251,7 +80,6 @@ _fl_create_fastfile() {
 # Auto-generated by mobile-ci service
 #
 # Lanes:
-#   bundle exec fastlane create_bundle_id   → Tạo Bundle ID qua ASC API
 #   bundle exec fastlane create_app         → Tạo app trên App Store Connect
 #   bundle exec fastlane setup_signing      → Tạo cert + provisioning (match)
 #   bundle exec fastlane build_ios          → Build IPA (gym)
@@ -294,33 +122,6 @@ def asc_api_key
   }
 end
 
-# ── LANE: register_bundle_id ───────────────────────────────────────────────────
-lane :register_bundle_id do |opts|
-  UI.header("🆔 Tạo Bundle ID qua ASC API")
-  bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
-  name      = opts[:name]      || ENV["APP_NAME"]      || "${APP_NAME}"
-  key       = asc_api_key
-
-  result = Actions::CreateBundleIdAction.run(
-    api_key_id:      key[:key_id],
-    api_issuer_id:   key[:issuer_id],
-    api_key_content: key[:key_content],
-    bundle_id:       bundle_id,
-    name:            name,
-    platform:        opts[:platform] || "IOS",
-  )
-
-  if result[:success]
-    UI.success("✅ Bundle ID: #{result[:identifier]} (id=#{result[:id]})")
-    File.write(File.join(__dir__, "bundle_id_result.json"), JSON.pretty_generate(result))
-  else
-    unless ["ENTITY_ALREADY_EXISTS", "already exists"].any? { |s| result[:error].to_s.include?(s) }
-      UI.user_error!(result[:error])
-    end
-    UI.important("Bundle ID đã tồn tại, tiếp tục...")
-  end
-end
-
 # ── LANE: create_app ─────────────────────────────────────────────────────────
 lane :create_app do |opts|
   UI.header("📱 Tạo App trên App Store Connect")
@@ -329,7 +130,6 @@ lane :create_app do |opts|
   sku       = opts[:sku]       || ENV["APP_SKU"]        || bundle_id.gsub(".", "-")
   language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-English}"
 
-  register_bundle_id(bundle_id: bundle_id, name: app_name)
   # Dùng ASC API Key để kiểm tra — không cần session
   key = asc_api_key
   api_key = app_store_connect_api_key(
@@ -363,7 +163,7 @@ lane :create_app do |opts|
       team_name:      ENV["APPLE_TEAM_NAME"] || "",
       itc_team_name:  ENV["ITC_TEAM_NAME"]   || ENV["APPLE_TEAM_NAME"] || "",
       skip_itc:       false,
-      skip_devcenter: true,
+      skip_devcenter: false,
     )
 
     UI.success("✅ App tạo thành công!")
@@ -506,7 +306,6 @@ lane :full_setup do |opts|
   bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
   app_name  = opts[:app_name]  || ENV["APP_NAME"]      || "${APP_NAME}"
 
-  create_bundle_id(bundle_id: bundle_id, name: app_name)
   create_app(bundle_id: bundle_id, app_name: app_name)
 
   if ENV["MATCH_GIT_URL"] && !ENV["MATCH_GIT_URL"].empty?
@@ -521,7 +320,6 @@ end
 # ── LANE: ci_pipeline ────────────────────────────────────────────────────────
 lane :ci_pipeline do
   UI.header("⚙️  CI Pipeline — ${APP_NAME}")
-  register_bundle_id unless ENV["SKIP_ASC_SETUP"] == "true"
   create_app         unless ENV["SKIP_ASC_SETUP"] == "true"
   build_ios          unless ENV["SKIP_BUILD"]     == "true"
   release_testflight(
@@ -590,7 +388,6 @@ run_fastlane_setup() {
 
   _fl_create_gemfile
   _fl_create_appfile
-  _fl_create_asc_action
   _fl_create_fastfile
   _fl_bundle_install
 
