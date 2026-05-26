@@ -1,0 +1,32 @@
+{
+	"appId": "ai.kscreens.app",
+	"appName": "K Screens",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https",
+		"allowNavigation": [
+			"*.youtube.com",
+			"*.googleapis.com",
+			"*.google.com"
+		]
+	},
+	"plugins": {
+		"SplashScreen": {
+			"launchShowDuration": 2000,
+			"launchAutoHide": true,
+			"backgroundColor": "#09090b",
+			"showSpinner": false
+		},
+		"StatusBar": {
+			"style": "Dark",
+			"backgroundColor": "#09090b"
+		}
+	},
+	"ios": {
+		"scheme": "App"
+	},
+	"android": {
+		"allowMixedContent": true,
+		"captureInput": true
+	}
+}
