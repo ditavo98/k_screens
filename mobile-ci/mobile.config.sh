@@ -5,7 +5,7 @@
 # ── Thông tin App ────────────────────────────────────────────────────────────
 APP_NAME="V Drama"
 APP_ID="ai.vdrama.app"
-APP_VERSION="${APP_VERSION:-1.0.0}"
+APP_VERSION="${APP_VERSION:-1.0.1}"
 
 # ── Capacitor ────────────────────────────────────────────────────────────────
 PLATFORMS="${CAP_PLATFORMS:-ios android}"

@@ -97,9 +97,68 @@ EOF
 }
 
 # --------------------------------------------------------------------------- #
+# Cập nhật APP_VERSION vào package.json, Android build.gradle và iOS pbxproj
+# --------------------------------------------------------------------------- #
+apply_app_version() {
+  log_section "Cấu hình App Version: ${APP_VERSION}"
+
+  # 1. Cập nhật package.json
+  local pkg_json="${PROJECT_ROOT}/package.json"
+  if [[ -f "$pkg_json" ]]; then
+    backup_file "$pkg_json"
+    APP_VERSION="${APP_VERSION}" node -e "
+      const fs = require('fs');
+      const pkg = JSON.parse(fs.readFileSync('${pkg_json}', 'utf8'));
+      pkg.version = process.env.APP_VERSION;
+      fs.writeFileSync('${pkg_json}', JSON.stringify(pkg, null, 2) + '\n');
+    "
+    log_ok "Đã cập nhật version '${APP_VERSION}' vào package.json"
+  else
+    log_warn "Không tìm thấy package.json tại ${PROJECT_ROOT}"
+  fi
+
+  # 2. Cập nhật Android (android/app/build.gradle)
+  local build_gradle="${PROJECT_ROOT}/android/app/build.gradle"
+  if [[ -f "$build_gradle" ]]; then
+    backup_file "$build_gradle"
+    APP_VERSION="${APP_VERSION}" node -e "
+      const fs = require('fs');
+      let c = fs.readFileSync('${build_gradle}', 'utf8');
+      
+      // Tính toán versionCode từ SemVer (ví dụ 1.2.3 -> 10203)
+      const parts = process.env.APP_VERSION.split('.').map(Number);
+      const major = parts[0] || 0;
+      const minor = parts[1] || 0;
+      const patch = parts[2] || 0;
+      const code = major * 10000 + minor * 100 + patch;
+      
+      c = c.replace(/versionName\s+\"[^\"]*\"/g, 'versionName \"' + process.env.APP_VERSION + '\"');
+      c = c.replace(/versionCode\s+\d+/g, 'versionCode ' + code);
+      fs.writeFileSync('${build_gradle}', c);
+      console.log('Android versionCode set to ' + code);
+    "
+    log_ok "Đã cập nhật Android build.gradle: versionName='${APP_VERSION}'"
+  fi
+
+  # 3. Cập nhật iOS (ios/App/App.xcodeproj/project.pbxproj)
+  local pbxproj="${PROJECT_ROOT}/ios/App/App.xcodeproj/project.pbxproj"
+  if [[ -f "$pbxproj" ]]; then
+    backup_file "$pbxproj"
+    APP_VERSION="${APP_VERSION}" node -e "
+      const fs = require('fs');
+      let c = fs.readFileSync('${pbxproj}', 'utf8');
+      c = c.replace(/MARKETING_VERSION\s*=\s*[^;]+/g, 'MARKETING_VERSION = ' + process.env.APP_VERSION);
+      fs.writeFileSync('${pbxproj}', c);
+    "
+    log_ok "Đã cập nhật iOS project.pbxproj: MARKETING_VERSION='${APP_VERSION}'"
+  fi
+}
+
+# --------------------------------------------------------------------------- #
 # Hàm tổng
 # --------------------------------------------------------------------------- #
 run_platform_fixes() {
   fix_ios_transport
   fix_android_network
+  apply_app_version
 }
