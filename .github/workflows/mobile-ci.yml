@@ -166,9 +166,13 @@ jobs:
           ls -lh android/app/build/outputs/bundle/release/ || echo "❌ Không tìm thấy AAB"
 
           echo ""
-          echo "── Cài fastlane ──"
-          sudo gem install fastlane -NV 2>&1
-          which fastlane && fastlane --version
+          echo "── Cài fastlane (nếu chưa có) ──"
+          if ! command -v fastlane &>/dev/null; then
+            sudo gem install fastlane -NV 2>&1
+          else
+            echo "✓ fastlane đã có: $(fastlane --version)"
+          fi
+
 
           echo ""
           echo "── Upload Google Play ──"
