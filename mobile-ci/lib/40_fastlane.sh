@@ -130,9 +130,9 @@ lane :create_app do |opts|
   sku       = opts[:sku]       || ENV["APP_SKU"]        || bundle_id.gsub(".", "-")
   language  = opts[:language]  || ENV["APP_LANGUAGE"]   || "${FL_APP_LANGUAGE:-English}"
 
-  # Dùng ASC API Key để kiểm tra — không cần session
+  # ── Bước 1: Check app đã tồn tại chưa qua ASC API Key ──
   key = asc_api_key
-  api_key = app_store_connect_api_key(
+  api_key_result = app_store_connect_api_key(
     key_id:                key[:key_id],
     issuer_id:             key[:issuer_id],
     key_content:           key[:key_content],
@@ -140,24 +140,35 @@ lane :create_app do |opts|
     duration:              1200,
     in_house:              false,
   )
-  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key)
+  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key_result)
 
   existing_app = Spaceship::ConnectAPI::App.find(bundle_id)
   if existing_app
-    UI.success("✅ App đã tồn tại trên ASC: #{bundle_id}")
+    UI.success("✅ App đã tồn tại trên ASC: #{bundle_id} (#{existing_app.name})")
     next
   end
-  
 
-  if ENV["FASTLANE_SESSION"] && !ENV["FASTLANE_SESSION"].empty?
-    UI.important("🔑 Đã tìm thấy FASTLANE_SESSION, sử dụng produce để tạo App...")
+  UI.important("App chưa tồn tại, tiến hành tạo mới...")
 
+  # ── Bước 2: Cần FASTLANE_SESSION để tạo app mới ──
+  unless ENV["FASTLANE_SESSION"] && !ENV["FASTLANE_SESSION"].empty?
+    UI.error("⚠️  Không có FASTLANE_SESSION!")
+    UI.error("👉 Chạy lệnh sau trên máy local rồi copy vào CI secret:")
+    UI.error("   bundle exec fastlane spaceauth -u #{ENV["APPLE_ID"] || "your@apple.com"}")
+    UI.error("   Sau đó set FASTLANE_SESSION=<giá trị vừa copy>")
+    UI.error("   Lưu ý: Session hết hạn sau vài tuần, cần renew định kỳ")
+    UI.user_error!("Thiếu FASTLANE_SESSION để tạo app mới.")
+  end
+
+  UI.important("🔑 Dùng FASTLANE_SESSION để tạo app...")
+
+  # ── Bước 3: Thử tạo app, fallback tên nếu bị trùng ──
+  begin
     create_app_online(
       username:       ENV["APPLE_ID"],
       app_identifier: bundle_id,
       app_name:       app_name,
       language:       language,
-      app_version:    ENV["APP_VERSION"] || "1.0.0",
       sku:            sku,
       platform:       "ios",
       team_name:      ENV["APPLE_TEAM_NAME"] || "",
@@ -165,13 +176,32 @@ lane :create_app do |opts|
       skip_itc:       false,
       skip_devcenter: false,
     )
+    UI.success("✅ App '#{app_name}' tạo thành công!")
 
-    UI.success("✅ App tạo thành công!")
-  else
-    UI.important("⚠️ Không có FASTLANE_SESSION!")
-    UI.important("Chạy: bundle exec fastlane spaceauth -u your@apple.com")
-    UI.important("Hoặc tạo thủ công tại https://appstoreconnect.apple.com")
-    UI.user_error!("Thiếu FASTLANE_SESSION để tạo app mới.")
+  rescue => e
+    if e.message.include?("The app name you entered is already being used") ||
+       e.message.include?("already taken")
+      suffix    = SecureRandom.hex(3)
+      new_name  = "#{app_name} (#{suffix})"
+      UI.important("⚠️  Tên '#{app_name}' đã bị dùng → thử tên '#{new_name}'")
+
+      create_app_online(
+        username:       ENV["APPLE_ID"],
+        app_identifier: bundle_id,
+        app_name:       new_name,
+        language:       language,
+        sku:            sku,
+        platform:       "ios",
+        team_name:      ENV["APPLE_TEAM_NAME"] || "",
+        itc_team_name:  ENV["ITC_TEAM_NAME"]   || ENV["APPLE_TEAM_NAME"] || "",
+        skip_itc:       false,
+        skip_devcenter: false,
+      )
+      UI.success("✅ App '#{new_name}' tạo thành công!")
+      UI.important("💡 Đổi tên thật tại: https://appstoreconnect.apple.com")
+    else
+      raise e
+    end
   end
 end
 
