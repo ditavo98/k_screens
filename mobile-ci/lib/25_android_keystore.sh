@@ -73,6 +73,42 @@ setup_android_keystore() {
   # ── Cấu hình Gradle ──
   _ensure_gradle_signing
 
+  # ── Tự động commit và push keystore + properties nếu chưa được track ──
+  if git rev-parse --is-inside-work-tree &>/dev/null; then
+    local rel_keystore
+    local rel_props
+    rel_keystore=$(git ls-files --error-unmatch "$keystore_file" 2>/dev/null || echo "untracked")
+    rel_props=$(git ls-files --error-unmatch "$props_file" 2>/dev/null || echo "untracked")
+
+    if [[ "$rel_keystore" == "untracked" ]] || [[ "$rel_props" == "untracked" ]]; then
+      log_info "Tự động commit và push keystore mới tạo lên git..."
+      
+      # Lưu thư mục hiện tại để restore
+      local cur_dir
+      cur_dir=$(pwd)
+      cd "${PROJECT_ROOT}"
+
+      # Thiết lập user nếu chạy trên CI
+      if [[ "${CI:-}" == "true" ]]; then
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+      fi
+
+      # Force add vì .gitignore có thể loại bỏ các file .jks hoặc .properties
+      git add -f "$keystore_file" "$props_file"
+      git commit -m "chore: auto-generate release keystore and properties [skip ci]" || true
+      
+      # Thử push lên origin HEAD hoặc origin main
+      if git push origin HEAD 2>/dev/null || git push origin main 2>/dev/null; then
+        log_ok "Đã commit và push keystore lên git thành công!"
+      else
+        log_warn "Không thể push keystore tự động lên git. Hãy push thủ công."
+      fi
+
+      cd "$cur_dir"
+    fi
+  fi
+
   # ── In thông tin ──
   echo ""
   log_info "╔══════════════════════════════════════════════════╗"
