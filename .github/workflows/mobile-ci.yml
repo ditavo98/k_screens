@@ -36,7 +36,7 @@ jobs:
       matrix:
         include:
           - platform: ios
-          # - platform: android
+          - platform: android
 
     env:
       # ── mobile-ci config ────────────────────────────────────────────────────
@@ -155,34 +155,34 @@ jobs:
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 10.5: (Android only) Upload lên Google Play via Fastlane
       # ═══════════════════════════════════════════════════════════════════════
-      - name: "🚀 Upload Google Play"
-        if: matrix.platform == 'android' && env.SKIP_UPLOAD != 'true'
-        working-directory: project
-        run: |
-          echo "── Kiểm tra môi trường ──"
-          which ruby && ruby --version
-          which gem && gem --version
+      # - name: "🚀 Upload Google Play"
+      #   if: matrix.platform == 'android' && env.SKIP_UPLOAD != 'true'
+      #   working-directory: project
+      #   run: |
+      #     echo "── Kiểm tra môi trường ──"
+      #     which ruby && ruby --version
+      #     which gem && gem --version
         
-          source ../mobile-ci/mobile.config.sh
-          echo "GOOGLE_PLAY_KEY_PATH=$GOOGLE_PLAY_KEY_PATH"
-          echo "APP_ID=$APP_ID"
-          ls -lh android/app/build/outputs/bundle/release/ || echo "❌ Không tìm thấy AAB"
+      #     source ../mobile-ci/mobile.config.sh
+      #     echo "GOOGLE_PLAY_KEY_PATH=$GOOGLE_PLAY_KEY_PATH"
+      #     echo "APP_ID=$APP_ID"
+      #     ls -lh android/app/build/outputs/bundle/release/ || echo "❌ Không tìm thấy AAB"
 
-          echo "── Cài fastlane via Bundler ──"
-          bundle install 2>&1
-          bundle exec fastlane supply \
-            --aab android/app/build/outputs/bundle/release/app-release.aab \
-            --json_key "$GOOGLE_PLAY_KEY_PATH" \
-            --package_name "$APP_ID" \
-            --track internal \
-            --skip_upload_metadata \
-            --skip_upload_changelogs \
-            --skip_upload_images \
-            --skip_upload_screenshots \
-            --skip_upload_apk \
-            --verbose 2>&1
+      #     echo "── Cài fastlane via Bundler ──"
+      #     bundle install 2>&1
+      #     bundle exec fastlane supply \
+      #       --aab android/app/build/outputs/bundle/release/app-release.aab \
+      #       --json_key "$GOOGLE_PLAY_KEY_PATH" \
+      #       --package_name "$APP_ID" \
+      #       --track internal \
+      #       --skip_upload_metadata \
+      #       --skip_upload_changelogs \
+      #       --skip_upload_images \
+      #       --skip_upload_screenshots \
+      #       --skip_upload_apk \
+      #       --verbose 2>&1
 
-          echo "✅ Upload Google Play (internal) thành công!"
+      #     echo "✅ Upload Google Play (internal) thành công!"
 
       # ═══════════════════════════════════════════════════════════════════════
       # STEP 11: Upload build artifacts

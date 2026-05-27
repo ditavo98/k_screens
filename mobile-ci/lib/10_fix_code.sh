@@ -305,8 +305,13 @@ fix_safe_area_overlap() {
   [class*="fixed"][class*="bottom-0"] {
     padding-bottom: env(safe-area-inset-bottom);
   }
-  /* Body fallback cho layout không có fixed header */
+  /* Body padding-top: đẩy in-flow content xuống đúng bằng phần mà fixed header
+     bị "nở" thêm bởi safe-area-inset-top. Nhờ vậy các trang dùng pt-20/pt-24
+     (đã tính sẵn cho navbar-height bình thường) vẫn clear navbar trên thiết bị
+     có notch. Trang có hero-behind-transparent-navbar cũng OK vì cả navbar lẫn
+     body cùng dịch xuống chung 1 lượng. */
   body {
+    padding-top: env(safe-area-inset-top);
     padding-left: env(safe-area-inset-left);
     padding-right: env(safe-area-inset-right);
   }
