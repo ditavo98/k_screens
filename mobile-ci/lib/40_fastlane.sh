@@ -145,6 +145,43 @@ def asc_api_key
   }
 end
 
+# ── Helper: Đảm bảo Beta Group tồn tại trên ASC ─────────────────────────────
+# Theo doc Fastlane Pilot: group phải tồn tại trước khi add tester / distribute.
+# https://docs.fastlane.tools/actions/pilot/#managing-beta-testers
+def ensure_beta_group(bundle_id, group_name)
+  key = asc_api_key
+  api_key_result = app_store_connect_api_key(
+    key_id:                key[:key_id],
+    issuer_id:             key[:issuer_id],
+    key_content:           key[:key_content],
+    is_key_content_base64: false,
+    duration:              1200,
+    in_house:              false,
+  )
+  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key_result)
+
+  app = Spaceship::ConnectAPI::App.find(bundle_id)
+  UI.user_error!("App #{bundle_id} chưa tồn tại trên ASC — chạy lane create_app trước") unless app
+
+  existing = app.get_beta_groups(filter: { name: group_name }).first
+  if existing
+    UI.success("✅ Beta Group '#{group_name}' đã tồn tại (id=#{existing.id})")
+    return existing
+  end
+
+  UI.important("⚠️  Group '#{group_name}' chưa có trên ASC → tạo mới...")
+  new_group = Spaceship::ConnectAPI::BetaGroup.create(
+    app_id:                    app.id,
+    group_name:                group_name,
+    is_internal_group:         false,
+    public_link_enabled:       false,
+    public_link_limit_enabled: false,
+    has_access_to_all_builds:  false,
+  )
+  UI.success("✅ Đã tạo Beta Group '#{group_name}' (id=#{new_group.id})")
+  new_group
+end
+
 # ── LANE: create_app ─────────────────────────────────────────────────────────
 lane :create_app do |opts|
   UI.header("📱 Tạo App trên App Store Connect")
@@ -366,9 +403,15 @@ lane :release_testflight do |opts|
     UI.message("ℹ️ TESTFLIGHT_TESTERS rỗng → bỏ qua bước add testers")
   else
     UI.header("👥 Add TestFlight testers (External Testers group)")
-    bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
+    bundle_id  = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
+    group_name = opts[:group]     || ENV["TESTFLIGHT_GROUP"] || "External Testers"
+
+    # Đảm bảo group tồn tại trên ASC (tạo mới nếu chưa có) — pilot add sẽ fail
+    # nếu group không tồn tại. Doc: https://docs.fastlane.tools/actions/pilot/#managing-beta-testers
+    ensure_beta_group(bundle_id, group_name)
+
     emails = testers_env.split(/[,\n\r\s]+/).map(&:strip).reject(&:empty?)
-    UI.message("📧 #{emails.length} email(s) sẽ được add: #{emails.join(', ')}")
+    UI.message("📧 #{emails.length} email(s) sẽ được add vào '#{group_name}': #{emails.join(', ')}")
 
     # Ghi ASC API key ra JSON tạm để truyền cho pilot CLI qua --api_key_path.
     # Format JSON theo spec của Fastlane: https://docs.fastlane.tools/app-store-connect-api/
@@ -384,11 +427,11 @@ lane :release_testflight do |opts|
     api_key_file.close
 
     emails.each do |email|
-      # Tương đương CLI: fastlane pilot add EMAIL -a BUNDLE -g "External Testers"
+      # Tương đương CLI: fastlane pilot add EMAIL -a BUNDLE -g GROUP_NAME
       cmd = [
         "bundle", "exec", "fastlane", "pilot", "add", email,
         "-a", bundle_id,
-        "-g", "External Testers",
+        "-g", group_name,
         "-f", email.split("@").first,
         "-l", "Tester",
         "--api_key_path", api_key_file.path,
