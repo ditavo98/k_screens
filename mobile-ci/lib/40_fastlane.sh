@@ -97,6 +97,11 @@ require "base64"
 require "time"
 require "open3"
 require "tempfile"
+require "net/http"
+require "uri"
+require "cgi"
+require "openssl"
+require "jwt"
 
 # ── Auto-load mobile.config.sh vào ENV ──────────────────────────────────────
 # Fastlane (Ruby) không tự source bash file. Đoạn này tự tìm và source
@@ -145,40 +150,168 @@ def asc_api_key
   }
 end
 
-# ── Helper: Đảm bảo Beta Group tồn tại trên ASC ─────────────────────────────
-# Theo doc Fastlane Pilot: group phải tồn tại trước khi add tester / distribute.
-# https://docs.fastlane.tools/actions/pilot/#managing-beta-testers
-def ensure_beta_group(bundle_id, group_name)
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers gọi App Store Connect REST API trực tiếp (port từ Node.js script).
+# ─────────────────────────────────────────────────────────────────────────────
+def asc_jwt
   key = asc_api_key
-  api_key_result = app_store_connect_api_key(
-    key_id:                key[:key_id],
-    issuer_id:             key[:issuer_id],
-    key_content:           key[:key_content],
-    is_key_content_base64: false,
-    duration:              1200,
-    in_house:              false,
-  )
-  Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.from(hash: api_key_result)
+  now = Time.now.to_i
+  payload = {
+    iss: key[:issuer_id],
+    iat: now,
+    exp: now + 600,
+    aud: "appstoreconnect-v1",
+  }
+  headers = { kid: key[:key_id], typ: "JWT" }
+  pk = OpenSSL::PKey.read(key[:key_content])
+  JWT.encode(payload, pk, "ES256", headers)
+end
 
-  app = Spaceship::ConnectAPI::App.find(bundle_id)
-  UI.user_error!("App #{bundle_id} chưa tồn tại trên ASC — chạy lane create_app trước") unless app
+def asc_api(method, path, body = nil)
+  uri = URI("https://api.appstoreconnect.apple.com/v1/#{path}")
+  req_class = {
+    "GET"    => Net::HTTP::Get,
+    "POST"   => Net::HTTP::Post,
+    "DELETE" => Net::HTTP::Delete,
+  }[method.to_s.upcase] || raise("Unsupported method: #{method}")
+  req = req_class.new(uri.request_uri)
+  req["Authorization"] = "Bearer #{asc_jwt}"
+  req["Content-Type"]  = "application/json"
+  req.body = JSON.dump(body) if body
 
-  existing = app.get_beta_groups(filter: { name: group_name }).first
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = true
+  resp = http.request(req)
+  parsed = (JSON.parse(resp.body) rescue nil)
+  [resp.code.to_i, parsed, resp.body]
+end
+
+def asc_error_detail(parsed, raw)
+  (parsed && parsed["errors"] && parsed["errors"].first && parsed["errors"].first["detail"]) || raw
+end
+
+def asc_find_app_id(bundle_id)
+  code, data, body = asc_api(:get, "apps?filter%5BbundleId%5D=#{CGI.escape(bundle_id)}")
+  UI.user_error!("List apps fail HTTP #{code}: #{body}") unless code == 200
+  app = (data["data"] || []).first
+  UI.user_error!("App với bundle '#{bundle_id}' chưa tồn tại trên ASC") unless app
+  app["id"]
+end
+
+def asc_get_or_create_group(app_id, group_name)
+  code, data, body = asc_api(:get, "betaGroups?filter%5Bapp%5D=#{app_id}")
+  UI.user_error!("List groups fail HTTP #{code}: #{body}") unless code == 200
+
+  existing = (data["data"] || []).find { |g| g.dig("attributes", "name") == group_name }
   if existing
-    UI.success("✅ Beta Group '#{group_name}' đã tồn tại (id=#{existing.id})")
-    return existing
+    UI.success("✅ Group '#{group_name}' đã tồn tại (id=#{existing["id"]})")
+    return existing["id"]
   end
 
-  UI.important("⚠️  Group '#{group_name}' chưa có trên ASC → tạo mới...")
-  new_group = app.create_beta_group(
-    group_name:                group_name,
-    is_internal_group:         false,
-    public_link_enabled:       false,
-    public_link_limit_enabled: false,
-    has_access_to_all_builds:  false,
-  )
-  UI.success("✅ Đã tạo Beta Group '#{group_name}' (id=#{new_group.id})")
-  new_group
+  UI.important("⚠️  Group '#{group_name}' chưa có → tạo mới...")
+  ccode, cdata, cbody = asc_api(:post, "betaGroups", {
+    data: {
+      type: "betaGroups",
+      attributes: { name: group_name, isInternalGroup: false },
+      relationships: { app: { data: { type: "apps", id: app_id } } },
+    },
+  })
+  UI.user_error!("Create group fail HTTP #{ccode}: #{cbody}") unless [200, 201].include?(ccode)
+  group_id = cdata["data"]["id"]
+  UI.success("✅ Đã tạo group '#{group_name}' (id=#{group_id})")
+  group_id
+end
+
+def asc_assign_latest_build_and_submit(app_id, group_id)
+  code, data, body = asc_api(:get, "builds?filter%5Bapp%5D=#{app_id}&sort=-uploadedDate&limit=1")
+  unless code == 200
+    UI.important("⚠️ Không lấy được builds: HTTP #{code}: #{body}")
+    return nil
+  end
+
+  build = (data["data"] || []).first
+  unless build
+    UI.message("ℹ️ Không có build nào trên ASC")
+    return nil
+  end
+
+  build_id = build["id"]
+  version  = build.dig("attributes", "version")
+  state    = build.dig("attributes", "processingState")
+  uploaded = build.dig("attributes", "uploadedDate")
+  UI.message("📦 Latest build: #{version} (#{state}) — uploaded #{uploaded.to_s.slice(0, 10)}")
+
+  if state != "VALID"
+    UI.important("⏳ Build chưa VALID (state=#{state}) → bỏ qua assign + submit, chạy lại lane này sau ~5-15 phút")
+    return nil
+  end
+
+  acode, _adata, abody = asc_api(:post, "betaGroups/#{group_id}/relationships/builds",
+    { data: [{ type: "builds", id: build_id }] })
+  if acode.between?(200, 299)
+    UI.success("✅ Assigned build #{version} vào group")
+  else
+    detail = asc_error_detail((JSON.parse(abody) rescue nil), abody).to_s
+    if detail.include?("already")
+      UI.message("ℹ️ Build #{version} đã được assign trước đó")
+    else
+      UI.important("⚠️ Assign build fail HTTP #{acode}: #{detail}")
+    end
+  end
+
+  scode, _sdata, sbody = asc_api(:post, "betaAppReviewSubmissions", {
+    data: {
+      type: "betaAppReviewSubmissions",
+      relationships: { build: { data: { type: "builds", id: build_id } } },
+    },
+  })
+  if scode.between?(200, 299)
+    UI.success("✅ Submitted build #{version} cho Beta App Review")
+  else
+    parsed = (JSON.parse(sbody) rescue nil)
+    detail = asc_error_detail(parsed, sbody).to_s
+    err_code = parsed && parsed["errors"] && parsed["errors"].first && parsed["errors"].first["code"]
+    if err_code == "ENTITY_UNPROCESSABLE-RELATIONSHIP" || detail.include?("already submitted") || detail.include?("in review")
+      UI.message("ℹ️ Build đã được submit hoặc đang trong quá trình review")
+    elsif detail.include?("missing")
+      UI.important("⚠️ Submit fail: thiếu Test Information (What to Test, Export Compliance...) — điền trên ASC web trước")
+    else
+      UI.important("⚠️ Submit Beta Review fail HTTP #{scode}: #{detail}")
+    end
+  end
+
+  build_id
+end
+
+def asc_add_tester(group_id, email)
+  lcode, ldata, lbody = asc_api(:get, "betaTesters?filter%5Bemail%5D=#{CGI.escape(email)}")
+  return [false, "lookup HTTP #{lcode}: #{lbody}"] unless lcode == 200
+  existing = (ldata["data"] || []).first
+
+  if existing
+    rcode, _rd, rbody = asc_api(:post, "betaGroups/#{group_id}/relationships/betaTesters",
+      { data: [{ type: "betaTesters", id: existing["id"] }] })
+    return [true, "linked existing"] if rcode.between?(200, 299)
+    detail = asc_error_detail((JSON.parse(rbody) rescue nil), rbody)
+    return [false, "attach HTTP #{rcode}: #{detail}"]
+  end
+
+  ccode, _cd, cbody = asc_api(:post, "betaTesters", {
+    data: {
+      type: "betaTesters",
+      attributes: {
+        email:     email,
+        firstName: email.split("@").first,
+        lastName:  "Tester",
+      },
+      relationships: {
+        betaGroups: { data: [{ type: "betaGroups", id: group_id }] },
+      },
+    },
+  })
+  return [true, "created + added"] if ccode.between?(200, 299)
+  detail = asc_error_detail((JSON.parse(cbody) rescue nil), cbody)
+  [false, "create HTTP #{ccode}: #{detail}"]
 end
 
 # ── LANE: create_app ─────────────────────────────────────────────────────────
@@ -394,59 +527,36 @@ lane :release_testflight do |opts|
   )
   UI.success("✅ Upload TestFlight + distribute cho External Testers thành công!")
 
-  # ── Post-upload: Auto add testers nếu TESTFLIGHT_TESTERS có giá trị ──
-  # Build đã process xong + distribute cho group "External Testers" ở bước trên,
-  # nên tester được add ở đây sẽ tự động nhận được build hiện tại.
+  # ── Post-upload: Quản lý External Testers qua ASC REST API trực tiếp ────────
+  # Port flow từ Node.js script (manage_testflight_testers.js): tất cả gọi
+  # endpoint public trong App Store Connect API docs, tránh dùng `pilot add`
+  # CLI vốn hit endpoint `bulkBetaTesterAssignments` đã chết.
+  bundle_id  = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
+  group_name = opts[:group]     || ENV["TESTFLIGHT_GROUP"] || "External Testers"
+
+  UI.header("📡 ASC API: lookup app + group")
+  app_id   = asc_find_app_id(bundle_id)
+  group_id = asc_get_or_create_group(app_id, group_name)
+
+  UI.header("📦 Assign latest build + submit Beta Review")
+  asc_assign_latest_build_and_submit(app_id, group_id)
+
   testers_env = ENV["TESTFLIGHT_TESTERS"].to_s.strip
   if testers_env.empty?
     UI.message("ℹ️ TESTFLIGHT_TESTERS rỗng → bỏ qua bước add testers")
   else
-    UI.header("👥 Add TestFlight testers")
-    bundle_id  = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
-    group_name = opts[:group]     || ENV["TESTFLIGHT_GROUP"] || "External Testers"
-
-    # Tạo group nếu chưa có (trả về object có .id)
-    beta_group = ensure_beta_group(bundle_id, group_name)
-
+    UI.header("👥 Add External Testers")
     emails = testers_env.split(/[,\n\r\s]+/).map(&:strip).reject(&:empty?)
     UI.message("📧 #{emails.length} email(s) sẽ được add vào '#{group_name}': #{emails.join(', ')}")
 
-    # KHÔNG dùng `pilot add` CLI vì nó gọi endpoint `POST /v1/bulkBetaTesterAssignments`
-    # mà Apple đã gỡ. Thay vào đó dùng Spaceship method `post_beta_tester_assignment`
-    # — gọi `POST /v1/betaTesters` (endpoint chính thức trong Apple ASC API).
     emails.each do |email|
-      begin
-        Spaceship::ConnectAPI::TestFlight.post_beta_tester_assignment(
-          beta_group_ids: [beta_group.id],
-          attributes: {
-            email:     email,
-            firstName: email.split("@").first,
-            lastName:  "Tester",
-          },
-        )
-        UI.success("✅ Added #{email}")
-      rescue => e
-        msg = e.message.to_s
-        # 409 / "already exists" → tester đã có trong hệ thống, attach vào group
-        if msg.include?("409") || msg.downcase.include?("already") || msg.include?("ENTITY_ERROR.RELATIONSHIP")
-          begin
-            existing = Spaceship::ConnectAPI::BetaTester.all(filter: { email: email }).first
-            if existing
-              Spaceship::ConnectAPI::TestFlight.add_beta_tester_to_group(
-                beta_group_id:   beta_group.id,
-                beta_tester_ids: [existing.id],
-              )
-              UI.success("✅ Linked existing tester #{email}")
-            else
-              UI.important("⚠️ #{email}: 409 nhưng không tìm thấy tester id")
-            end
-          rescue => e2
-            UI.important("⚠️ Attach existing #{email} fail: #{e2.message}")
-          end
-        else
-          UI.important("⚠️ Failed to add #{email}: #{msg}")
-        end
+      ok, info = asc_add_tester(group_id, email)
+      if ok
+        UI.success("✅ #{email} (#{info})")
+      else
+        UI.important("⚠️ #{email}: #{info}")
       end
+      sleep(0.3) # rate-limit an toàn (tương đương sleep(300) trong JS)
     end
   end
 end
