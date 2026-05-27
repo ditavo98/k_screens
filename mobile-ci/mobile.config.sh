@@ -62,4 +62,4 @@ FL_APP_SKU=""
 # Dùng bởi: node mobile-ci/lib/manage_testflight_testers.js <add|remove>
 # Ví dụ:
 #   TESTFLIGHT_TESTERS="user1@example.com,user2@example.com"
-TESTFLIGHT_TESTERS="${TESTFLIGHT_TESTERS:-}"
+TESTFLIGHT_TESTERS="vodinhtai0@gmail.com,qctest501@gmail.com"
