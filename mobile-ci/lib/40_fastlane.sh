@@ -367,7 +367,7 @@ lane :release_testflight do |opts|
 
     bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
 
-    script_path = File.expand_path("fastlane/manage_testflight_testers.js")
+    script_path = File.expand_path("manage_testflight_testers.js", __dir__)
     if !File.exist?(script_path)
       UI.important("⚠️ Không tìm thấy #{script_path} → bỏ qua add testers")
     else
