@@ -95,6 +95,28 @@ _fl_create_fastfile() {
 require "json"
 require "base64"
 require "time"
+require "open3"
+
+# ── Auto-load mobile.config.sh vào ENV ──────────────────────────────────────
+# Fastlane (Ruby) không tự source bash file. Đoạn này tự tìm và source
+# mobile.config.sh, import các biến cần thiết vào ENV để mọi lane dùng được.
+# Thứ tự ưu tiên path: MOBILE_CONFIG_PATH env > project_root > ../mobile-ci/.
+_mobile_config_candidates = [
+  ENV["MOBILE_CONFIG_PATH"],
+  File.expand_path("../mobile.config.sh", __dir__),
+  File.expand_path("../../mobile-ci/mobile.config.sh", __dir__),
+].compact
+_mobile_config_path = _mobile_config_candidates.find { |p| File.exist?(p) }
+
+if _mobile_config_path
+  UI.message("📋 Load mobile config: #{_mobile_config_path}") if defined?(UI)
+  %w[TESTFLIGHT_TESTERS APP_VERSION APP_BUNDLE_ID FL_APP_LANGUAGE FL_APP_SKU].each do |_var|
+    next if ENV[_var] && !ENV[_var].strip.empty?
+    _out, _, _status = Open3.capture3('bash', '-c',
+      %(source "#{_mobile_config_path}" >/dev/null 2>&1 && printf "%s" "\${#{_var}:-}"))
+    ENV[_var] = _out if _status.success? && !_out.empty?
+  end
+end
 
 before_all do
   setup_ci if ENV["CI"]
