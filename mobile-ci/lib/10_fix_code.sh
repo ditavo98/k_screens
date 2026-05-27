@@ -238,11 +238,94 @@ inject_debug_console() {
 }
 
 # --------------------------------------------------------------------------- #
+# Fix safe-area overlap: UI bị che bởi status bar / notch / Dynamic Island
+# trên iPhone X+ và Android edge-to-edge.
+#   1. Thêm `viewport-fit=cover` vào <meta viewport> — bắt buộc để env() trả về > 0 trên iOS
+#   2. Append CSS dùng env(safe-area-inset-*) cho fixed header / bottom bar
+# --------------------------------------------------------------------------- #
+fix_safe_area_overlap() {
+  local html="${INDEX_HTML_PATH:-${PROJECT_ROOT}/index.html}"
+  local css="${INDEX_CSS_PATH:-${PROJECT_ROOT}/src/index.css}"
+
+  log_section "Fix safe-area overlap (status bar / notch)"
+
+  # 1. Patch viewport meta trong index.html
+  if [[ -f "$html" ]]; then
+    if grep -q "viewport-fit=cover" "$html"; then
+      log_ok "viewport-fit=cover đã có trong index.html"
+    else
+      backup_file "$html"
+      node -e "
+        const fs = require('fs');
+        let c = fs.readFileSync('${html}', 'utf8');
+        const before = c;
+        c = c.replace(
+          /<meta\s+name=([\"'])viewport\1\s+content=([\"'])([^\"']*)\2\s*\/?>/i,
+          (m, q1, q2, content) => {
+            if (/viewport-fit\s*=/.test(content)) return m;
+            const trimmed = content.replace(/\s*,?\s*\$/, '');
+            return '<meta name=\"viewport\" content=\"' + trimmed + ', viewport-fit=cover\">';
+          }
+        );
+        if (before === c) {
+          // Không tìm thấy viewport meta → inject mới
+          c = c.replace(
+            /(<head[^>]*>)/i,
+            '\$1\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\">'
+          );
+        }
+        fs.writeFileSync('${html}', c);
+      "
+      log_ok "Đã thêm viewport-fit=cover vào index.html"
+    fi
+  else
+    log_skip "Không tìm thấy: $html"
+  fi
+
+  # 2. Append safe-area CSS vào src/index.css (idempotent qua marker)
+  if [[ -f "$css" ]]; then
+    if grep -q "mobile-ci:safe-area" "$css"; then
+      log_ok "safe-area CSS đã có trong $(basename "$css")"
+    else
+      backup_file "$css"
+      cat >> "$css" << 'EOF'
+
+/* mobile-ci:safe-area — bù padding cho status bar / notch / Dynamic Island.
+   Cần meta viewport có viewport-fit=cover thì env() mới > 0 trên iOS. */
+@supports (padding: env(safe-area-inset-top)) {
+  /* Fixed/sticky header (vd. <header class="fixed top-0 ...">): vì position:fixed
+     out-of-flow, body padding không đẩy được — phải pad internal cho chính header. */
+  header.fixed,
+  header.sticky,
+  [class*="fixed"][class*="top-0"],
+  [class*="sticky"][class*="top-0"] {
+    padding-top: env(safe-area-inset-top);
+  }
+  /* Fixed bottom bar (tab bar) */
+  [class*="fixed"][class*="bottom-0"] {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Body fallback cho layout không có fixed header */
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+EOF
+      log_ok "Đã append safe-area CSS vào $(basename "$css")"
+    fi
+  else
+    log_skip "Không tìm thấy: $css"
+  fi
+}
+
+# --------------------------------------------------------------------------- #
 # Hàm tổng: chạy tất cả code fixes
 # --------------------------------------------------------------------------- #
 run_code_fixes() {
   fix_router
   fix_vite_config
   fix_index_html
+  fix_safe_area_overlap
   inject_debug_console
 }
