@@ -99,6 +99,53 @@ function download(url, dest) {
   });
 }
 
+// File signatures
+const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const ICO_HEADER = Buffer.from([0x00, 0x00, 0x01, 0x00]); // reserved=0, type=1=ICO
+
+function isPng(buf) {
+  return buf.length >= 8 && buf.subarray(0, 8).equals(PNG_SIG);
+}
+
+function isIco(buf) {
+  return buf.length >= 4 && buf.subarray(0, 4).equals(ICO_HEADER);
+}
+
+/**
+ * Extract PNG có kích thước lớn nhất từ ICO file (Windows icon container).
+ * Trả về Buffer chứa PNG, hoặc null nếu ICO không chứa PNG embedded
+ * (mà chứa BMP/DIB — không hỗ trợ convert ở đây).
+ *
+ * ICO layout:
+ *   - Header (6 bytes): reserved (2), type (2)=1, count (2)
+ *   - n × IconDirEntry (16 bytes mỗi cái):
+ *       width(1), height(1), colorCount(1), reserved(1),
+ *       planes(2), bitCount(2), bytesInRes(4), imageOffset(4)
+ *   - Image data tại các offset (PNG hoặc BMP/DIB)
+ */
+function extractLargestPngFromIco(buffer) {
+  if (!isIco(buffer)) return null;
+  const count = buffer.readUInt16LE(4);
+  let best = null;
+  for (let i = 0; i < count; i++) {
+    const off = 6 + i * 16;
+    if (off + 16 > buffer.length) break;
+    let w = buffer.readUInt8(off);
+    let h = buffer.readUInt8(off + 1);
+    if (w === 0) w = 256;
+    if (h === 0) h = 256;
+    const size = buffer.readUInt32LE(off + 8);
+    const imgOffset = buffer.readUInt32LE(off + 12);
+    if (!best || w * h > best.w * best.h) {
+      best = { w, h, size, imgOffset };
+    }
+  }
+  if (!best) return null;
+  const data = buffer.subarray(best.imgOffset, best.imgOffset + best.size);
+  if (isPng(data)) return data;
+  return null; // BMP/DIB embedded — không convert được
+}
+
 function resolveLocalPath(raw) {
   if (path.isAbsolute(raw)) return raw;
   return path.resolve(CONFIG_DIR, raw);
@@ -136,7 +183,34 @@ async function main() {
   if (size === 0) {
     throw new Error(`File icon ghi ra rỗng: ${DEST}`);
   }
-  console.log(`[prepare-icon] Đã ghi ${DEST} (${size} bytes)`);
+
+  // Validate format. URL favicon nhiều khi là ICO multi-resolution (sharp
+  // không đọc được) → extract PNG lớn nhất bên trong.
+  const buf = fs.readFileSync(DEST);
+  if (isPng(buf)) {
+    console.log(`[prepare-icon] Đã ghi ${DEST} (${size} bytes, PNG)`);
+  } else if (isIco(buf)) {
+    console.log(`[prepare-icon] File là ICO — extract PNG lớn nhất bên trong`);
+    const png = extractLargestPngFromIco(buf);
+    if (!png) {
+      throw new Error(
+        `Source là ICO nhưng chỉ chứa BMP embedded (không convert được). ` +
+          `Hãy cung cấp APP_ICON là file PNG/JPEG riêng (>= 1024x1024).`
+      );
+    }
+    fs.writeFileSync(DEST, png);
+    console.log(
+      `[prepare-icon] Đã extract PNG (${png.length} bytes) → ${DEST}`
+    );
+  } else {
+    // Sharp hỗ trợ PNG/JPEG/WebP/AVIF/TIFF/GIF — không validate hết,
+    // nhưng cảnh báo nếu không phải PNG để dễ debug.
+    const head = buf.subarray(0, 4).toString("hex");
+    console.warn(
+      `[prepare-icon] CẢNH BÁO: file không bắt đầu bằng signature PNG/ICO ` +
+        `(magic=${head}). Có thể sharp/capacitor-assets sẽ không đọc được.`
+    );
+  }
 }
 
 main().catch((err) => {

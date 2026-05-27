@@ -64,19 +64,58 @@ apply_app_icon() {
   cd "${PROJECT_ROOT}"
   log_info "Chạy @capacitor/assets generate..."
 
-  local cap_args="--iconBackgroundColor '${CAP_SPLASH_BG:-#ffffff}' --iconBackgroundColorDark '${CAP_SPLASH_BG:-#000000}'"
+  # Chỉ generate cho platform có trong PLATFORMS — tránh đụng folder partial.
+  # @capacitor/assets nhận flag --ios / --android để giới hạn.
+  local platform_flags=""
+  for p in ${PLATFORMS:-}; do
+    case "$p" in
+      ios|android) platform_flags="${platform_flags} --${p}" ;;
+    esac
+  done
 
-  if npx --yes @capacitor/assets generate $cap_args 2>&1; then
+  local bg="${CAP_SPLASH_BG:-#ffffff}"
+  local cap_args="--iconBackgroundColor ${bg} --iconBackgroundColorDark ${bg}${platform_flags}"
+
+  npx --yes @capacitor/assets generate $cap_args 2>&1 || \
+    npx --yes @capacitor/assets generate $platform_flags 2>&1 || \
+    true  # exit code 0 không tin được — verify bằng output file
+
+  # Verify thật sự có file icon được sinh ra cho mỗi platform yêu cầu.
+  # @capacitor/assets có thể exit 0 ngay cả khi sharp không đọc được source
+  # (vd. file ICO/SVG) — chỉ log "No assets found" rồi thoát.
+  local any_generated=0
+  local missing=()
+  for p in ${PLATFORMS:-}; do
+    case "$p" in
+      ios)
+        local ios_icon_dir="${PROJECT_ROOT}/ios/App/App/Assets.xcassets/AppIcon.appiconset"
+        if compgen -G "${ios_icon_dir}/*.png" > /dev/null; then
+          log_ok "  → iOS:     ${ios_icon_dir#${PROJECT_ROOT}/}/"
+          any_generated=1
+        else
+          missing+=("ios (${ios_icon_dir#${PROJECT_ROOT}/})")
+        fi
+        ;;
+      android)
+        local and_icon_dir="${PROJECT_ROOT}/android/app/src/main/res"
+        if compgen -G "${and_icon_dir}/mipmap-*/ic_launcher*.png" > /dev/null; then
+          log_ok "  → Android: ${and_icon_dir#${PROJECT_ROOT}/}/mipmap-*/"
+          any_generated=1
+        else
+          missing+=("android (${and_icon_dir#${PROJECT_ROOT}/}/mipmap-*)")
+        fi
+        ;;
+    esac
+  done
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    log_error "Generate icon thất bại — thiếu output cho: ${missing[*]}"
+    log_error "Source icon (${icon_out}) có thể không phải PNG hợp lệ cho sharp/libvips."
+    log_error "Kiểm tra: \`file ${icon_out}\` — nếu là ICO/SVG, cần cung cấp PNG/JPEG riêng."
+    return 1
+  fi
+
+  if [[ "$any_generated" == "1" ]]; then
     log_ok "App icon đã được generate thành công!"
-    log_ok "  → iOS:     ios/App/App/Assets.xcassets/AppIcon.appiconset/"
-    log_ok "  → Android: android/app/src/main/res/mipmap-*/"
-  else
-    log_warn "Lỗi với background args, thử lại không có args..."
-    if npx --yes @capacitor/assets generate 2>&1; then
-      log_ok "App icon đã được generate thành công!"
-    else
-      log_error "Generate icon thất bại."
-      return 1
-    fi
   fi
 }
