@@ -43,6 +43,38 @@ PYEOF
 }
 
 # --------------------------------------------------------------------------- #
+# iOS: ITSAppUsesNonExemptEncryption = false trong Info.plist
+# (tránh câu hỏi export compliance mỗi lần submit lên App Store Connect)
+# --------------------------------------------------------------------------- #
+fix_ios_encryption() {
+  local plist="${PROJECT_ROOT}/ios/App/App/Info.plist"
+
+  if [[ ! -f "$plist" ]]; then
+    log_skip "Info.plist chưa có (iOS chưa được add)"
+    return
+  fi
+
+  log_section "Fix iOS ITSAppUsesNonExemptEncryption"
+
+  ensure_cmd python3 || { log_warn "Bỏ qua (python3 không có)"; return; }
+
+  PLIST_PATH="$plist" python3 - << 'PYEOF'
+import plistlib, os
+path = os.environ['PLIST_PATH']
+with open(path, 'rb') as f:
+    plist = plistlib.load(f)
+if plist.get('ITSAppUsesNonExemptEncryption') is False:
+    print('ITSAppUsesNonExemptEncryption already set to false')
+else:
+    plist['ITSAppUsesNonExemptEncryption'] = False
+    with open(path, 'wb') as f:
+        plistlib.dump(plist, f)
+    print(f'Set ITSAppUsesNonExemptEncryption = false in {path}')
+PYEOF
+  log_ok "ITSAppUsesNonExemptEncryption đã được set false"
+}
+
+# --------------------------------------------------------------------------- #
 # Android: network_security_config.xml + AndroidManifest.xml
 # --------------------------------------------------------------------------- #
 fix_android_network() {
@@ -159,6 +191,7 @@ apply_app_version() {
 # --------------------------------------------------------------------------- #
 run_platform_fixes() {
   fix_ios_transport
+  fix_ios_encryption
   fix_android_network
   apply_app_version
   apply_app_icon
