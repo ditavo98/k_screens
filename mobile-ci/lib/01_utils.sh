@@ -107,7 +107,9 @@ detect_package_manager() {
   log_info "Package manager: ${PACKAGE_MANAGER}"
 }
 
-# Cài npm/pnpm/yarn package — tự đảm bảo PM có sẵn
+# Cài npm/pnpm/yarn package — tự đảm bảo PM có sẵn.
+# Luôn chạy từ PROJECT_ROOT để pnpm workspace resolve đúng.
+# Trả về exit code của package manager (lỗi sẽ propagate ra caller).
 pkg_add() {
   local is_dev="${1:-false}"
   shift
@@ -115,19 +117,71 @@ pkg_add() {
 
   # Double-check PM có sẵn
   if ! command -v "${PACKAGE_MANAGER:-npm}" &>/dev/null; then
-    ensure_cmd "${PACKAGE_MANAGER:-npm}"
+    ensure_cmd "${PACKAGE_MANAGER:-npm}" || return 1
   fi
 
-  case "${PACKAGE_MANAGER:-npm}" in
-    pnpm) [[ "$is_dev" == "true" ]] && pnpm add -w -D "${pkgs[@]}" || pnpm add -w "${pkgs[@]}" ;;
-    yarn) [[ "$is_dev" == "true" ]] && yarn add --dev "${pkgs[@]}" || yarn add "${pkgs[@]}" ;;
-    *)    [[ "$is_dev" == "true" ]] && npm install --save-dev "${pkgs[@]}" || npm install --save "${pkgs[@]}" ;;
-  esac
+  (
+    cd "${PROJECT_ROOT}" || exit 1
+    case "${PACKAGE_MANAGER:-npm}" in
+      pnpm)
+        if [[ "$is_dev" == "true" ]]; then
+          pnpm add -w -D "${pkgs[@]}"
+        else
+          pnpm add -w "${pkgs[@]}"
+        fi
+        ;;
+      yarn)
+        if [[ "$is_dev" == "true" ]]; then
+          yarn add --dev "${pkgs[@]}"
+        else
+          yarn add "${pkgs[@]}"
+        fi
+        ;;
+      *)
+        if [[ "$is_dev" == "true" ]]; then
+          npm install --save-dev "${pkgs[@]}"
+        else
+          npm install --save "${pkgs[@]}"
+        fi
+        ;;
+    esac
+  )
 }
 
-# Kiểm tra package đã cài chưa
+# Kiểm tra package đã cài chưa — check trực tiếp node_modules để tránh
+# false-positive từ require() cache / NODE_PATH / parent resolution.
 pkg_installed() {
-  node -e "require('$1')" &>/dev/null 2>&1
+  local pkg="$1"
+  [[ -n "${PROJECT_ROOT:-}" ]] || return 1
+  [[ -f "${PROJECT_ROOT}/node_modules/${pkg}/package.json" ]]
+}
+
+# Force-install package nếu sau khi chạy pkg_add vẫn chưa thấy trong node_modules.
+# Thử nhiều cách: pkg_add bình thường → npm install --no-save (fallback chắc chắn).
+ensure_pkg_installed() {
+  local pkg="$1"
+  local is_dev="${2:-false}"
+
+  if pkg_installed "$pkg"; then
+    return 0
+  fi
+
+  log_info "Cài $pkg ..."
+  if pkg_add "$is_dev" "$pkg" && pkg_installed "$pkg"; then
+    return 0
+  fi
+
+  log_warn "$pkg vẫn chưa có trong node_modules sau khi chạy ${PACKAGE_MANAGER:-npm} add."
+  log_warn "Fallback: npm install --no-save $pkg (trực tiếp tại PROJECT_ROOT)"
+  ( cd "${PROJECT_ROOT}" && npm install --no-save "$pkg" ) || true
+
+  if pkg_installed "$pkg"; then
+    return 0
+  fi
+
+  log_error "Không thể cài $pkg vào ${PROJECT_ROOT}/node_modules/"
+  log_error "Kiểm tra: pnpm-workspace.yaml, lockfile mode (CI=$CI), hoặc permission."
+  return 1
 }
 
 # Thay thế nội dung file dùng Node.js (safe trên cả macOS lẫn Linux)

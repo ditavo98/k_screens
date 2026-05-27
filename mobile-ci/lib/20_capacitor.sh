@@ -11,33 +11,17 @@
 install_capacitor() {
   log_section "Cài đặt Capacitor"
 
-  if pkg_installed "@capacitor/core"; then
-    log_ok "@capacitor/core đã được cài"
-  else
-    log_info "Cài @capacitor/core..."
-    pkg_add false @capacitor/core
-    pkg_add true  @capacitor/cli
-    log_ok "@capacitor/core + @capacitor/cli đã được cài"
-  fi
+  # Core + CLI
+  ensure_pkg_installed "@capacitor/core"  false || return 1
+  ensure_pkg_installed "@capacitor/cli"   true  || return 1
+  log_ok "@capacitor/core + @capacitor/cli sẵn sàng"
 
-  # Cài platform packages
+  # Platform packages
   for platform in ${PLATFORMS:-}; do
     case "$platform" in
-      ios)
-        if pkg_installed "@capacitor/ios"; then
-          log_ok "@capacitor/ios đã được cài"
-        else
-          log_info "Cài @capacitor/ios..."
-          pkg_add false @capacitor/ios
-        fi
-        ;;
-      android)
-        if pkg_installed "@capacitor/android"; then
-          log_ok "@capacitor/android đã được cài"
-        else
-          log_info "Cài @capacitor/android..."
-          pkg_add false @capacitor/android
-        fi
+      ios|android)
+        ensure_pkg_installed "@capacitor/${platform}" false || return 1
+        log_ok "@capacitor/${platform} sẵn sàng"
         ;;
       *)
         log_warn "Platform không hỗ trợ: $platform"
@@ -193,6 +177,21 @@ add_platforms() {
 sync_capacitor() {
   log_section "Capacitor Sync"
   cd "$PROJECT_ROOT"
+
+  # Verify lại platform packages — bảo vệ trường hợp:
+  #   • node_modules bị clean giữa install_capacitor và sync (CI cache flow)
+  #   • pkg_add fail im lặng trên runner (frozen lockfile, workspace mismatch...)
+  for platform in ${PLATFORMS:-}; do
+    case "$platform" in
+      ios|android)
+        if ! pkg_installed "@capacitor/${platform}"; then
+          log_warn "node_modules/@capacitor/${platform}/ thiếu trước cap sync — cài lại"
+          ensure_pkg_installed "@capacitor/${platform}" false || return 1
+        fi
+        ;;
+    esac
+  done
+
   npx cap sync
   log_ok "cap sync hoàn tất"
 }
