@@ -170,8 +170,7 @@ def ensure_beta_group(bundle_id, group_name)
   end
 
   UI.important("⚠️  Group '#{group_name}' chưa có trên ASC → tạo mới...")
-  new_group = Spaceship::ConnectAPI::BetaGroup.create(
-    app_id:                    app.id,
+  new_group = app.create_beta_group(
     group_name:                group_name,
     is_internal_group:         false,
     public_link_enabled:       false,
