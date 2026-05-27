@@ -96,6 +96,7 @@ require "json"
 require "base64"
 require "time"
 require "open3"
+require "tempfile"
 
 # ── Auto-load mobile.config.sh vào ENV ──────────────────────────────────────
 # Fastlane (Ruby) không tự source bash file. Đoạn này tự tìm và source
@@ -359,7 +360,8 @@ lane :release_testflight do |opts|
   UI.success("✅ Upload TestFlight thành công!")
 
   # ── Post-upload: Auto add testers nếu TESTFLIGHT_TESTERS có giá trị ──
-  # Dùng pilot(action: "add") — Fastlane built-in, không cần script ngoài.
+  # Dùng pilot CLI theo doc: https://docs.fastlane.tools/actions/pilot/#managing-beta-testers
+  # Tương đương: fastlane pilot add EMAIL -a BUNDLE -g "External Testers"
   # Lưu ý: build cần ở trạng thái VALID (đã process xong) thì tester mới
   # nhận được. Nếu skip_waiting_for_build_processing: true, có thể phải chạy
   # lane này lại sau ~5-15 phút.
@@ -372,27 +374,37 @@ lane :release_testflight do |opts|
     emails = testers_env.split(/[,\n\r\s]+/).map(&:strip).reject(&:empty?)
     UI.message("📧 #{emails.length} email(s) sẽ được add: #{emails.join(', ')}")
 
+    # Ghi ASC API key ra JSON tạm để truyền cho pilot CLI qua --api_key_path.
+    # Format JSON theo spec của Fastlane: https://docs.fastlane.tools/app-store-connect-api/
+    api_key_file = Tempfile.new(["asc_api_key", ".json"])
+    api_key_file.write(JSON.dump(
+      "key_id"                => key[:key_id],
+      "issuer_id"             => key[:issuer_id],
+      "key"                   => Base64.strict_encode64(key[:key_content]),
+      "duration"              => 1200,
+      "in_house"              => false,
+      "is_key_content_base64" => true,
+    ))
+    api_key_file.close
+
     emails.each do |email|
-      begin
-        pilot(
-          action:         "add",
-          api_key:        api_key_result,
-          app_identifier: bundle_id,
-          email:          email,
-          first_name:     email.split("@").first,
-          last_name:      "Tester",
-          groups:         ["External Testers"],
-        )
+      # Tương đương CLI: fastlane pilot add EMAIL -a BUNDLE -g "External Testers"
+      cmd = [
+        "bundle", "exec", "fastlane", "pilot", "add", email,
+        "-a", bundle_id,
+        "-g", "External Testers",
+        "-f", email.split("@").first,
+        "-l", "Tester",
+        "--api_key_path", api_key_file.path,
+      ]
+      if system(*cmd)
         UI.success("✅ Added #{email}")
-      rescue => e
-        msg = e.message.to_s
-        if msg =~ /already (exists|added|invited)/i || msg.include?("duplicate")
-          UI.message("ℹ️ #{email} đã có trong group")
-        else
-          UI.important("⚠️ Failed to add #{email}: #{msg}")
-        end
+      else
+        UI.important("⚠️ Failed to add #{email} (xem log phía trên — có thể tester đã tồn tại)")
       end
     end
+
+    api_key_file.unlink
   end
 end
 
