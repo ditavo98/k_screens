@@ -54,20 +54,22 @@ create_capacitor_config() {
   local cfg="${PROJECT_ROOT}/capacitor.config.json"
 
   if [[ -f "$cfg" ]]; then
-    local cur_dir
-    cur_dir=$(node -e "try{const c=require('${cfg}');process.stdout.write(c.webDir||'')}catch(e){}" 2>/dev/null)
-    if [[ "$cur_dir" != "${WEB_DIR}" ]]; then
-      log_warn "webDir hiện tại '${cur_dir}' ≠ '${WEB_DIR}', đang cập nhật..."
-      backup_file "$cfg"
-      node -e "
-        const fs=require('fs');
-        const c=JSON.parse(fs.readFileSync('${cfg}','utf8'));
-        c.webDir='${WEB_DIR}';
-        fs.writeFileSync('${cfg}',JSON.stringify(c,null,2));
-      "
-    else
-      log_ok "capacitor.config.json đã đúng"
-    fi
+    backup_file "$cfg"
+    CFG_PATH="$cfg" WEB_DIR_V="$WEB_DIR" ALLOW_NAV="${CAP_ALLOW_NAVIGATION:-}" node -e "
+      const fs=require('fs');
+      const p=process.env.CFG_PATH;
+      const c=JSON.parse(fs.readFileSync(p,'utf8'));
+      c.webDir=process.env.WEB_DIR_V;
+      c.server=c.server||{};
+      c.server.androidScheme='https';
+      if(process.env.ALLOW_NAV){
+        c.server.allowNavigation=process.env.ALLOW_NAV.split(',').map(s=>s.trim()).filter(Boolean);
+      }
+      c.plugins=c.plugins||{};
+      c.plugins.CapacitorHttp={enabled:true};
+      fs.writeFileSync(p,JSON.stringify(c,null,2));
+    "
+    log_ok "capacitor.config.json đã được patch (webDir, allowNavigation, CapacitorHttp)"
     return
   fi
 
@@ -90,6 +92,9 @@ create_capacitor_config() {
     "allowNavigation": ${allow_nav_json}
   },
   "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
     "SplashScreen": {
       "launchShowDuration": 2000,
       "launchAutoHide": true,

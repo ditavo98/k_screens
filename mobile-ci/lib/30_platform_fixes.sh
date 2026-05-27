@@ -161,4 +161,5 @@ run_platform_fixes() {
   fix_ios_transport
   fix_android_network
   apply_app_version
+  apply_app_icon
 }

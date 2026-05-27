@@ -13,12 +13,21 @@ WEB_DIR="dist"
 BUILD_CMD=""
 
 # Domains cho phép trong WebView
-CAP_ALLOW_NAVIGATION="*.youtube.com,*.googleapis.com,*.google.com,*.ailive.kr"
+CAP_ALLOW_NAVIGATION="*.youtube.com,*.googleapis.com,*.google.com,*.ailive.kr,*.vibe-x.app"
 
 # UI
 CAP_SPLASH_BG="#09090b"
 CAP_STATUS_BAR_STYLE="Dark"
 CAP_STATUS_BAR_BG="#09090b"
+
+# ── App Icon ─────────────────────────────────────────────────────────────────
+# Đường dẫn file icon (PNG ≥ 1024x1024) HOẶC URL http(s).
+# Để TRỐNG → tự động đọc <link rel="icon" href="..."> từ project/index.html.
+# Override khi cần:
+#   APP_ICON="/path/to/icon.png"
+#   APP_ICON="./assets/icon.png"             (tương đối với mobile.config.sh)
+#   APP_ICON="https://example.com/icon.png"  (URL — sẽ tự động tải về)
+APP_ICON=""
 
 # ── Source code paths ────────────────────────────────────────────────────────
 # LƯU Ý: Để trống → mobile-ci tự resolve từ PROJECT_ROOT sau khi được set.
