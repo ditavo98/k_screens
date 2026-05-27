@@ -401,48 +401,53 @@ lane :release_testflight do |opts|
   if testers_env.empty?
     UI.message("ℹ️ TESTFLIGHT_TESTERS rỗng → bỏ qua bước add testers")
   else
-    UI.header("👥 Add TestFlight testers (External Testers group)")
+    UI.header("👥 Add TestFlight testers")
     bundle_id  = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
     group_name = opts[:group]     || ENV["TESTFLIGHT_GROUP"] || "External Testers"
 
-    # Đảm bảo group tồn tại trên ASC (tạo mới nếu chưa có) — pilot add sẽ fail
-    # nếu group không tồn tại. Doc: https://docs.fastlane.tools/actions/pilot/#managing-beta-testers
-    ensure_beta_group(bundle_id, group_name)
+    # Tạo group nếu chưa có (trả về object có .id)
+    beta_group = ensure_beta_group(bundle_id, group_name)
 
     emails = testers_env.split(/[,\n\r\s]+/).map(&:strip).reject(&:empty?)
     UI.message("📧 #{emails.length} email(s) sẽ được add vào '#{group_name}': #{emails.join(', ')}")
 
-    # Ghi ASC API key ra JSON tạm để truyền cho pilot CLI qua --api_key_path.
-    # Format JSON theo spec của Fastlane: https://docs.fastlane.tools/app-store-connect-api/
-    api_key_file = Tempfile.new(["asc_api_key", ".json"])
-    api_key_file.write(JSON.dump(
-      "key_id"                => key[:key_id],
-      "issuer_id"             => key[:issuer_id],
-      "key"                   => Base64.strict_encode64(key[:key_content]),
-      "duration"              => 1200,
-      "in_house"              => false,
-      "is_key_content_base64" => true,
-    ))
-    api_key_file.close
-
+    # KHÔNG dùng `pilot add` CLI vì nó gọi endpoint `POST /v1/bulkBetaTesterAssignments`
+    # mà Apple đã gỡ. Thay vào đó dùng Spaceship method `post_beta_tester_assignment`
+    # — gọi `POST /v1/betaTesters` (endpoint chính thức trong Apple ASC API).
     emails.each do |email|
-      # Tương đương CLI: fastlane pilot add EMAIL -a BUNDLE -g GROUP_NAME
-      cmd = [
-        "bundle", "exec", "fastlane", "pilot", "add", email,
-        "-a", bundle_id,
-        "-g", group_name,
-        "-f", email.split("@").first,
-        "-l", "Tester",
-        "--api_key_path", api_key_file.path,
-      ]
-      if system(*cmd)
+      begin
+        Spaceship::ConnectAPI::TestFlight.post_beta_tester_assignment(
+          beta_group_ids: [beta_group.id],
+          attributes: {
+            email:     email,
+            firstName: email.split("@").first,
+            lastName:  "Tester",
+          },
+        )
         UI.success("✅ Added #{email}")
-      else
-        UI.important("⚠️ Failed to add #{email} (xem log phía trên — có thể tester đã tồn tại)")
+      rescue => e
+        msg = e.message.to_s
+        # 409 / "already exists" → tester đã có trong hệ thống, attach vào group
+        if msg.include?("409") || msg.downcase.include?("already") || msg.include?("ENTITY_ERROR.RELATIONSHIP")
+          begin
+            existing = Spaceship::ConnectAPI::BetaTester.all(filter: { email: email }).first
+            if existing
+              Spaceship::ConnectAPI::TestFlight.add_beta_tester_to_group(
+                beta_group_id:   beta_group.id,
+                beta_tester_ids: [existing.id],
+              )
+              UI.success("✅ Linked existing tester #{email}")
+            else
+              UI.important("⚠️ #{email}: 409 nhưng không tìm thấy tester id")
+            end
+          rescue => e2
+            UI.important("⚠️ Attach existing #{email} fail: #{e2.message}")
+          end
+        else
+          UI.important("⚠️ Failed to add #{email}: #{msg}")
+        end
       end
     end
-
-    api_key_file.unlink
   end
 end
 
