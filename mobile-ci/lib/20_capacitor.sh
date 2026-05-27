@@ -149,6 +149,77 @@ init_capacitor() {
 }
 
 # --------------------------------------------------------------------------- #
+# Kiểm tra platform folder có scaffold đầy đủ chưa
+# (phân biệt với folder rỗng / chỉ có keystore committed)
+# --------------------------------------------------------------------------- #
+_platform_is_scaffolded() {
+  local platform="$1"
+  local dir="${PROJECT_ROOT}/${platform}"
+  [[ -d "$dir" ]] || return 1
+  case "$platform" in
+    android)
+      # cap add android tạo build.gradle + settings.gradle ở root
+      [[ -f "${dir}/build.gradle" ]] && [[ -f "${dir}/settings.gradle" ]]
+      ;;
+    ios)
+      # cap add ios tạo App/Podfile + App/App.xcodeproj
+      [[ -f "${dir}/App/Podfile" ]] && [[ -d "${dir}/App/App.xcodeproj" ]]
+      ;;
+    *)
+      [[ -d "$dir" ]]
+      ;;
+  esac
+}
+
+# --------------------------------------------------------------------------- #
+# Re-scaffold platform khi folder bị partial (vd. chỉ keystore committed).
+# Move folder cũ ra tmp → cap add → restore các file user (file scaffold không tạo).
+# Idempotent: file mà cap add tạo (build.gradle, etc.) giữ phiên bản mới;
+# file user (keystore.properties, release-keystore.jks, ...) được restore.
+# --------------------------------------------------------------------------- #
+_rebuild_platform_preserving_user_files() {
+  local platform="$1"
+  local dir="${PROJECT_ROOT}/${platform}"
+  local backup_root
+  backup_root=$(mktemp -d)
+  local saved="${backup_root}/${platform}"
+
+  log_warn "Platform '${platform}' tồn tại nhưng KHÔNG đầy đủ — re-scaffold giữ file user"
+
+  log_info "Backup ${platform}/ → ${saved}"
+  if ! mv "$dir" "$saved"; then
+    log_error "Không backup được ${dir}"
+    rm -rf "$backup_root"
+    return 1
+  fi
+
+  log_info "Chạy cap add ${platform}"
+  if ! ( cd "$PROJECT_ROOT" && npx cap add "$platform" ); then
+    log_error "cap add ${platform} thất bại — khôi phục backup"
+    rm -rf "$dir"
+    mv "$saved" "$dir"
+    rm -rf "$backup_root"
+    return 1
+  fi
+
+  # Restore: chỉ những file scaffold KHÔNG tạo (file user committed: keystore, properties...)
+  local restored=0
+  while IFS= read -r -d '' src; do
+    local rel="${src#${saved}/}"
+    local dest="${dir}/${rel}"
+    if [[ ! -e "$dest" ]]; then
+      mkdir -p "$(dirname "$dest")"
+      cp "$src" "$dest"
+      log_info "  + restore ${platform}/${rel}"
+      restored=$((restored + 1))
+    fi
+  done < <(find "$saved" -type f -print0 2>/dev/null)
+
+  log_ok "Đã restore ${restored} file user vào ${platform}/"
+  rm -rf "$backup_root"
+}
+
+# --------------------------------------------------------------------------- #
 # Add platforms (ios / android)
 # --------------------------------------------------------------------------- #
 add_platforms() {
@@ -161,13 +232,27 @@ add_platforms() {
   fi
 
   for platform in ${PLATFORMS}; do
+    case "$platform" in
+      ios|android) ;;
+      *)
+        log_warn "Platform không hỗ trợ: $platform"
+        continue
+        ;;
+    esac
+
+    if _platform_is_scaffolded "$platform"; then
+      log_ok "Platform '${platform}' đã scaffold đầy đủ"
+      continue
+    fi
+
     if [[ -d "${PROJECT_ROOT}/${platform}" ]]; then
-      log_ok "Platform '${platform}' đã tồn tại"
+      # Folder tồn tại nhưng thiếu scaffold → re-scaffold giữ file user
+      _rebuild_platform_preserving_user_files "$platform" || return 1
     else
       log_info "Thêm platform: ${platform}"
-      npx cap add "$platform"
-      log_ok "Đã thêm platform: ${platform}"
+      ( cd "$PROJECT_ROOT" && npx cap add "$platform" ) || return 1
     fi
+    log_ok "Đã thêm platform: ${platform}"
   done
 }
 
@@ -178,21 +263,35 @@ sync_capacitor() {
   log_section "Capacitor Sync"
   cd "$PROJECT_ROOT"
 
-  # Verify lại platform packages — bảo vệ trường hợp:
-  #   • node_modules bị clean giữa install_capacitor và sync (CI cache flow)
-  #   • pkg_add fail im lặng trên runner (frozen lockfile, workspace mismatch...)
-  for platform in ${PLATFORMS:-}; do
+  if [[ -z "${PLATFORMS:-}" ]]; then
+    log_skip "PLATFORMS rỗng — bỏ qua cap sync"
+    return
+  fi
+
+  # Sync per-platform để khi job chỉ chạy ios (CAP_PLATFORMS=ios) thì
+  # KHÔNG đụng vào folder android/ đã committed sẵn trong repo
+  # (và ngược lại). `npx cap sync` không arg sẽ sync tất cả platform
+  # folder hiện có — gây fail nếu @capacitor/<platform> chưa cài.
+  for platform in ${PLATFORMS}; do
     case "$platform" in
-      ios|android)
-        if ! pkg_installed "@capacitor/${platform}"; then
-          log_warn "node_modules/@capacitor/${platform}/ thiếu trước cap sync — cài lại"
-          ensure_pkg_installed "@capacitor/${platform}" false || return 1
-        fi
+      ios|android) ;;
+      *)
+        log_warn "Bỏ qua platform không hỗ trợ: $platform"
+        continue
         ;;
     esac
+
+    # Safety net: verify @capacitor/<platform> còn trong node_modules.
+    # Bảo vệ trường hợp node_modules bị clean giữa install và sync.
+    if ! pkg_installed "@capacitor/${platform}"; then
+      log_warn "node_modules/@capacitor/${platform}/ thiếu trước cap sync — cài lại"
+      ensure_pkg_installed "@capacitor/${platform}" false || return 1
+    fi
+
+    log_info "Sync platform: ${platform}"
+    npx cap sync "${platform}"
   done
 
-  npx cap sync
   log_ok "cap sync hoàn tất"
 }
 
