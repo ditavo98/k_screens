@@ -359,38 +359,38 @@ lane :release_testflight do |opts|
   UI.success("✅ Upload TestFlight thành công!")
 
   # ── Post-upload: Auto add testers nếu TESTFLIGHT_TESTERS có giá trị ──
+  # Dùng pilot(action: "add") — Fastlane built-in, không cần script ngoài.
+  # Lưu ý: build cần ở trạng thái VALID (đã process xong) thì tester mới
+  # nhận được. Nếu skip_waiting_for_build_processing: true, có thể phải chạy
+  # lane này lại sau ~5-15 phút.
   testers_env = ENV["TESTFLIGHT_TESTERS"].to_s.strip
   if testers_env.empty?
     UI.message("ℹ️ TESTFLIGHT_TESTERS rỗng → bỏ qua bước add testers")
   else
-    UI.header("👥 Add TestFlight testers (External group)")
-
+    UI.header("👥 Add TestFlight testers (External Testers group)")
     bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
+    emails = testers_env.split(/[,\n\r\s]+/).map(&:strip).reject(&:empty?)
+    UI.message("📧 #{emails.length} email(s) sẽ được add: #{emails.join(', ')}")
 
-    script_path = File.expand_path("manage_testflight_testers.js", __dir__)
-    if !File.exist?(script_path)
-      UI.important("⚠️ Không tìm thấy #{script_path} → bỏ qua add testers")
-    else
-      # Truyền credentials qua env (script đọc cả ASC_* và APPLE_* aliases)
-      # Script sẽ tự lookup ASC numeric app id từ APP_BUNDLE_ID qua API.
-      ENV["APP_BUNDLE_ID"]            = bundle_id
-      ENV["ASC_KEY_ID"]             ||= key[:key_id]
-      ENV["ASC_ISSUER_ID"]          ||= key[:issuer_id]
-      ENV["ASC_PRIVATE_KEY_CONTENT"]||= key[:key_content]
-
-      # Đảm bảo Node deps có sẵn (chỉ install nếu thiếu)
-      deps_ok = system('node', '-e', 'require("axios");require("jsonwebtoken")',
-                       out: File::NULL, err: File::NULL)
-      unless deps_ok
-        UI.message("📦 Cài deps cho testflight script (axios, jsonwebtoken)...")
-        sh("npm install --no-save axios jsonwebtoken", log: false)
-      end
-
-      ok = system("node", script_path, "add")
-      if ok
-        UI.success("✅ Add testers hoàn tất")
-      else
-        UI.important("⚠️ Add testers gặp lỗi nhưng upload đã thành công — kiểm tra log phía trên")
+    emails.each do |email|
+      begin
+        pilot(
+          action:         "add",
+          api_key:        api_key_result,
+          app_identifier: bundle_id,
+          email:          email,
+          first_name:     email.split("@").first,
+          last_name:      "Tester",
+          groups:         ["External Testers"],
+        )
+        UI.success("✅ Added #{email}")
+      rescue => e
+        msg = e.message.to_s
+        if msg =~ /already (exists|added|invited)/i || msg.include?("duplicate")
+          UI.message("ℹ️ #{email} đã có trong group")
+        else
+          UI.important("⚠️ Failed to add #{email}: #{msg}")
+        end
       end
     end
   end
@@ -436,24 +436,6 @@ error do |lane, exception|
 end
 FFEOF
   log_ok "fastlane/Fastfile đã được tạo"
-}
-
-# --------------------------------------------------------------------------- #
-# Copy script manage_testflight_testers.js vào project/fastlane/
-# Luôn overwrite để đảm bảo phiên bản mới nhất theo mobile-ci đang cài.
-# --------------------------------------------------------------------------- #
-_fl_copy_tf_script() {
-  local src="${SERVICE_DIR}/lib/manage_testflight_testers.js"
-  local dst="${PROJECT_ROOT}/fastlane/manage_testflight_testers.js"
-
-  if [[ ! -f "$src" ]]; then
-    log_warn "Không tìm thấy script source: $src"
-    return
-  fi
-
-  mkdir -p "${PROJECT_ROOT}/fastlane"
-  cp "$src" "$dst"
-  log_ok "TestFlight tester script đã copy: fastlane/manage_testflight_testers.js"
 }
 
 # --------------------------------------------------------------------------- #
@@ -503,7 +485,6 @@ run_fastlane_setup() {
   _fl_create_gemfile
   _fl_create_appfile
   _fl_create_fastfile
-  _fl_copy_tf_script
   _fl_bundle_install
 
   log_ok "Fastlane setup hoàn tất!"
