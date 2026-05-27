@@ -306,7 +306,7 @@ end
 # ── LANE: release_testflight ─────────────────────────────────────────────────
 lane :release_testflight do |opts|
   UI.header("🚀 Upload lên TestFlight")
-  
+
   key = asc_api_key
   api_key_result = app_store_connect_api_key(
     key_id:                key[:key_id],
@@ -335,6 +335,43 @@ lane :release_testflight do |opts|
     },
   )
   UI.success("✅ Upload TestFlight thành công!")
+
+  # ── Post-upload: Auto add testers nếu TESTFLIGHT_TESTERS có giá trị ──
+  testers_env = ENV["TESTFLIGHT_TESTERS"].to_s.strip
+  if testers_env.empty?
+    UI.message("ℹ️ TESTFLIGHT_TESTERS rỗng → bỏ qua bước add testers")
+  else
+    UI.header("👥 Add TestFlight testers (External group)")
+
+    bundle_id = opts[:bundle_id] || ENV["APP_BUNDLE_ID"] || "${APP_ID}"
+
+    script_path = File.expand_path("fastlane/manage_testflight_testers.js")
+    if !File.exist?(script_path)
+      UI.important("⚠️ Không tìm thấy #{script_path} → bỏ qua add testers")
+    else
+      # Truyền credentials qua env (script đọc cả ASC_* và APPLE_* aliases)
+      # Script sẽ tự lookup ASC numeric app id từ APP_BUNDLE_ID qua API.
+      ENV["APP_BUNDLE_ID"]            = bundle_id
+      ENV["ASC_KEY_ID"]             ||= key[:key_id]
+      ENV["ASC_ISSUER_ID"]          ||= key[:issuer_id]
+      ENV["ASC_PRIVATE_KEY_CONTENT"]||= key[:key_content]
+
+      # Đảm bảo Node deps có sẵn (chỉ install nếu thiếu)
+      deps_ok = system('node', '-e', 'require("axios");require("jsonwebtoken")',
+                       out: File::NULL, err: File::NULL)
+      unless deps_ok
+        UI.message("📦 Cài deps cho testflight script (axios, jsonwebtoken)...")
+        sh("npm install --no-save axios jsonwebtoken", log: false)
+      end
+
+      ok = system("node", script_path, "add")
+      if ok
+        UI.success("✅ Add testers hoàn tất")
+      else
+        UI.important("⚠️ Add testers gặp lỗi nhưng upload đã thành công — kiểm tra log phía trên")
+      end
+    end
+  end
 end
 
 # ── LANE: full_setup ─────────────────────────────────────────────────────────
@@ -377,6 +414,24 @@ error do |lane, exception|
 end
 FFEOF
   log_ok "fastlane/Fastfile đã được tạo"
+}
+
+# --------------------------------------------------------------------------- #
+# Copy script manage_testflight_testers.js vào project/fastlane/
+# Luôn overwrite để đảm bảo phiên bản mới nhất theo mobile-ci đang cài.
+# --------------------------------------------------------------------------- #
+_fl_copy_tf_script() {
+  local src="${SERVICE_DIR}/lib/manage_testflight_testers.js"
+  local dst="${PROJECT_ROOT}/fastlane/manage_testflight_testers.js"
+
+  if [[ ! -f "$src" ]]; then
+    log_warn "Không tìm thấy script source: $src"
+    return
+  fi
+
+  mkdir -p "${PROJECT_ROOT}/fastlane"
+  cp "$src" "$dst"
+  log_ok "TestFlight tester script đã copy: fastlane/manage_testflight_testers.js"
 }
 
 # --------------------------------------------------------------------------- #
@@ -426,6 +481,7 @@ run_fastlane_setup() {
   _fl_create_gemfile
   _fl_create_appfile
   _fl_create_fastfile
+  _fl_copy_tf_script
   _fl_bundle_install
 
   log_ok "Fastlane setup hoàn tất!"

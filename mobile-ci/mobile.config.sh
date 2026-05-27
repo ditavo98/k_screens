@@ -55,3 +55,11 @@ BUILD_CONFIG="Release"
 SKIP_FASTLANE="${SKIP_FASTLANE:-false}"
 FL_APP_LANGUAGE="ko"
 FL_APP_SKU=""
+
+# ── TestFlight ───────────────────────────────────────────────────────────────
+# Danh sách email tester cho TestFlight (External Testers group).
+# Cách nhau bởi dấu phẩy, hoặc xuống dòng (dùng heredoc/multi-line string).
+# Dùng bởi: node mobile-ci/lib/manage_testflight_testers.js <add|remove>
+# Ví dụ:
+#   TESTFLIGHT_TESTERS="user1@example.com,user2@example.com"
+TESTFLIGHT_TESTERS="${TESTFLIGHT_TESTERS:-}"
