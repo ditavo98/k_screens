@@ -345,26 +345,22 @@ lane :release_testflight do |opts|
     ipa:                               opts[:ipa_path] || "build/App.ipa",
     skip_waiting_for_build_processing: true,
     distribute_external:               false,
-    notify_external_testers:           false,
+    notify_external_testers:           true,
     changelog:                         opts[:changelog] || ENV["RELEASE_NOTES"] || "Build mới",
     beta_app_description:              "${APP_NAME}",
-    demo_account_required:             false,
     beta_app_review_info: {
       contact_email: "dita.vo@metacrew.vn",
       contact_first_name: "DEV",
-      contact_last_name: "PlanB",
+      contact_last_name: "Meta",
       contact_phone: "+84981531110",
       demo_account_required: false,
     },
   )
-  UI.success("✅ Upload TestFlight thành công!")
+  UI.success("✅ Upload TestFlight + distribute cho External Testers thành công!")
 
   # ── Post-upload: Auto add testers nếu TESTFLIGHT_TESTERS có giá trị ──
-  # Dùng pilot CLI theo doc: https://docs.fastlane.tools/actions/pilot/#managing-beta-testers
-  # Tương đương: fastlane pilot add EMAIL -a BUNDLE -g "External Testers"
-  # Lưu ý: build cần ở trạng thái VALID (đã process xong) thì tester mới
-  # nhận được. Nếu skip_waiting_for_build_processing: true, có thể phải chạy
-  # lane này lại sau ~5-15 phút.
+  # Build đã process xong + distribute cho group "External Testers" ở bước trên,
+  # nên tester được add ở đây sẽ tự động nhận được build hiện tại.
   testers_env = ENV["TESTFLIGHT_TESTERS"].to_s.strip
   if testers_env.empty?
     UI.message("ℹ️ TESTFLIGHT_TESTERS rỗng → bỏ qua bước add testers")
