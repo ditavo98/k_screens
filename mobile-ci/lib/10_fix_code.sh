@@ -164,10 +164,85 @@ fix_index_html() {
 }
 
 # --------------------------------------------------------------------------- #
+# Inject eruda (mobile DevTools) vào index.html
+# Chỉ chạy khi SHOW_LOG=true. Idempotent (đánh dấu bằng marker comment).
+# --------------------------------------------------------------------------- #
+inject_debug_console() {
+  local html="${INDEX_HTML_PATH:-${PROJECT_ROOT}/index.html}"
+  local marker="<!-- mobile-ci:eruda -->"
+
+  log_section "Inject debug console (eruda)"
+
+  if [[ "${SHOW_LOG:-false}" != "true" ]]; then
+    # Nếu đã inject trước đó nhưng giờ tắt → xóa
+    if [[ -f "$html" ]] && grep -q "mobile-ci:eruda" "$html"; then
+      backup_file "$html"
+      node -e "
+        const fs=require('fs');
+        let c=fs.readFileSync('${html}','utf8');
+        c=c.replace(/[ \t]*<!-- mobile-ci:eruda -->[\s\S]*?<!-- \/mobile-ci:eruda -->\s*/g,'');
+        fs.writeFileSync('${html}',c);
+      "
+      log_ok "SHOW_LOG=false → đã gỡ eruda khỏi index.html"
+    else
+      log_skip "SHOW_LOG=false, bỏ qua"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$html" ]]; then
+    log_skip "Không tìm thấy: $html"
+    return
+  fi
+
+  if grep -q "mobile-ci:eruda" "$html"; then
+    log_ok "eruda đã được inject"
+    return
+  fi
+
+  backup_file "$html"
+  node -e "
+    const fs=require('fs');
+    let c=fs.readFileSync('${html}','utf8');
+    const snippet = [
+      '    <!-- mobile-ci:eruda -->',
+      '    <script src=\"https://cdn.jsdelivr.net/npm/eruda\"></script>',
+      '    <script>',
+      '      (function(){',
+      '        if (typeof eruda === \"undefined\") return;',
+      '        eruda.init();',
+      '        // Patch fetch để log request/response trong Console',
+      '        var _f = window.fetch;',
+      '        window.fetch = function(){',
+      '          var args = arguments;',
+      '          var url = typeof args[0] === \"string\" ? args[0] : args[0].url;',
+      '          var t0 = Date.now();',
+      '          console.log(\"[fetch →]\", url, args[1] || {});',
+      '          return _f.apply(this, args).then(function(r){',
+      '            console.log(\"[fetch ←]\", r.status, url, (Date.now()-t0)+\"ms\");',
+      '            return r;',
+      '          }).catch(function(e){',
+      '            console.error(\"[fetch ✗]\", url, e && e.message);',
+      '            throw e;',
+      '          });',
+      '        };',
+      '      })();',
+      '    </script>',
+      '    <!-- /mobile-ci:eruda -->',
+      ''
+    ].join('\n');
+    c = c.replace(/(<\/head>)/i, snippet + '\$1');
+    fs.writeFileSync('${html}', c);
+  "
+  log_ok "Đã inject eruda + fetch logger (xuất hiện ở góc app khi mở)"
+}
+
+# --------------------------------------------------------------------------- #
 # Hàm tổng: chạy tất cả code fixes
 # --------------------------------------------------------------------------- #
 run_code_fixes() {
   fix_router
   fix_vite_config
   fix_index_html
+  inject_debug_console
 }

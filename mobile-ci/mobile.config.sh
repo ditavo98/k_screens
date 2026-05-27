@@ -40,6 +40,13 @@ INDEX_HTML_PATH=""
 # Scripts sandbox cần xóa khỏi index.html
 SANDBOX_SCRIPT_DOMAINS="dev-cdn.vibe-x.app"
 
+# ── Debug ────────────────────────────────────────────────────────────────────
+# Inject eruda (mobile DevTools: Console + Network + Elements) vào app build.
+# Bật để xem trực tiếp request/response API trên thiết bị, không cần USB.
+# "true"  → inject, hiện icon DevTools ở góc màn hình app
+# "false" → không inject (mặc định cho production)
+SHOW_LOG="${SHOW_LOG:-true}"
+
 # ── iOS ──────────────────────────────────────────────────────────────────────
 IOS_SCHEME="App"
 BUILD_CONFIG="Release"
